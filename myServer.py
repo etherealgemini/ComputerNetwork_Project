@@ -10,6 +10,7 @@ from threading import Thread
 # Equivalent to CRLF, named NEWLINE for clarity
 NEWLINE = "\r\n"
 
+
 # Let's define some functions to help us deal with files, since reading them
 # and returning their data is going to be a very common operation.
 
@@ -48,6 +49,7 @@ def has_permission_other(file_name):
 # TODO: Finish this set with all relevant files types that should be read in binary
 binary_type_files = set(["jpg", "jpeg", "mp3", "png", "html", "js", "css"])
 
+
 def should_return_binary(file_extension):
     """
     Returns `True` if the file with `file_extension` should be sent back as
@@ -70,6 +72,7 @@ mime_types = {
     "jpg": "image/jpg",
     "jpeg": "image/jpeg"
 }
+
 
 def get_file_mime_type(file_extension):
     """
@@ -138,42 +141,39 @@ class HTTPServer:
         return self.method_not_allowed()
 
     # The response to a HEADER request
-    def head_request(self, requested_file, data): 
+    def head_request(self, requested_file, data):
         if not os.path.exists(requested_file):
             response = NOT_FOUND
         elif not has_permission_other(requested_file):
             response = FORBIDDEN
         else:
             response = OK
-            
+
         return response.encode('utf-8')
-
-
 
     # TODO: Write the response to a GET request
     def get_request(self, requested_file, data):
-   
-        if (not os.path.exists(requested_file)):
-        	return self.resource_not_found()
-        elif (not has_permission_other(requested_file)):
-        	return self.resource_forbidden()
+
+        if not os.path.exists(requested_file):
+            return self.resource_not_found()
+        elif not has_permission_other(requested_file):
+            return self.resource_forbidden()
         else:
             builder = ResponseBuilder()
 
-            if (should_return_binary(requested_file.split(".")[1])):
+            if should_return_binary(requested_file.split(".")[1]):
                 builder.set_content(get_file_binary_contents(requested_file))
             else:
                 builder.set_content(get_file_contents(requested_file))
-            
+
             builder.set_status("200", "OK")
 
             builder.add_header("Connection", "close")
             builder.add_header("Content-Type", get_file_mime_type(requested_file.split(".")[1]))
-     
-            return builder.build()
-  
 
-        """
+            return builder.build()
+
+    """
         Responds to a GET request with the associated bytes.
 
         If the request is to a file that does not exist, returns
@@ -190,7 +190,7 @@ class HTTPServer:
 
     # TODO: Write the response to a POST request
     def post_request(self, requested_file, data):
-        
+
         builder = ResponseBuilder()
         builder.set_status("200", "OK")
         builder.add_header("Connection", "close")
@@ -250,8 +250,6 @@ class HTTPServer:
         builder.set_content(get_file_contents("404.html"))
         return builder.build()
 
-
-
     # TODO: Make a function that handles forbidden error
     def resource_forbidden(self):
         """
@@ -300,16 +298,16 @@ class ResponseBuilder:
 
     # TODO Complete the build function
     def build(self):
-       
+
         response = self.status
         response += NEWLINE
         for i in self.headers:
-        	response += i
+            response += i
         response += NEWLINE
         response += NEWLINE
         response = response.encode("utf-8")
         response += self.content
-        
+
         return response
         """
         Returns the utf-8 bytes of the response.
