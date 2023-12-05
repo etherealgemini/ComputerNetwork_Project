@@ -1,9 +1,9 @@
 import copy
+import mimetypes as mime
 import socket
 import threading
 
 NEWLINE = "\r\n"
-
 
 def url_decoder(url: str) -> dict[str]:
     """
@@ -24,7 +24,6 @@ def url_decoder(url: str) -> dict[str]:
     fragment: null
 
     target: listContent.jsp
-    :parameter url
     :return: a dict of decoded url
     """
 
@@ -91,8 +90,9 @@ class server:
     """
 
     def handle_request(self, req):
-        data = req.strip().split(NEWLINE)
-        request_line = data[0].split()
+        header, body = req.strip().split('\r\n\r\n', 1)
+        headers = header.split(NEWLINE)
+        request_line = headers[0].split()
         req_method = request_line[0]
         url = request_line[1]
 
@@ -122,6 +122,7 @@ class server:
             return self.delete(decoded_url)
 
     def download(self, decoded_url):
+
         print(f"download: {decoded_url['path']}")
         pass
 
