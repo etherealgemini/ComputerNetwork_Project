@@ -23,13 +23,13 @@ template += f"<script>start(\"{VIEW_PATH}\");</script>"
 for root,dirs,files in temp:
     cnt+=1
     for dir in dirs:
-        ctime = int(os.path.getmtime(root + dir))
+        ctime = int(os.path.getmtime(root +"\\"+ dir.replace("/","\\")))
         formatted_ctime = time.strftime('%Y/%m/%d %H:%M:%S', time.localtime(ctime))
         template += "\r\n"
         template += f"<script>addRow(\"{dir}\", \"{dir}\", 1, 0, \"0 B\", {ctime}, \"{formatted_ctime}\");</script>"
     for file in files:
-        siz = os.path.getsize(root+file)
-        ctime = int(os.path.getmtime(root+file))
+        siz = os.path.getsize(root+"\\"+file)
+        ctime = int(os.path.getmtime(root+"\\"+file.replace("/","\\")))
         formatted_ctime = time.strftime('%Y/%m/%d %H:%M:%S',time.localtime(ctime))
         template += "\r\n"
         template += f"<script>addRow(\"{file}\", \"{file}\", 0, {siz}, \"{siz} B\", {ctime}, \"{formatted_ctime}\");</script>"

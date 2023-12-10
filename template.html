@@ -1,14 +1,41 @@
 
-<!DOCTYPE html>
+<!--<!DOCTYPE html>-->
 
 <html dir="ltr" lang="zh">
 
 <head>
+  <script src="https://cdn.jsdelivr.net/jquery/latest/jquery.min.js"></script>
+  <script src="https://cdn.staticfile.org/downloadjs/1.4.8/download.min.js"></script>
+
 <meta charset="utf-8">
 <meta name="color-scheme" content="light dark">
 <meta name="google" value="notranslate">
 
 <script>
+  function view(url) {
+    console.log("view: "+url);
+    window.location.replace(url)
+    // $.ajax({
+    //   beforeSend: function(){
+    //     console.log("ajax")
+    //   },
+    //   url: url,
+    //   type: "GET",
+    //   dataType: "html",
+    //   success: function (data){
+    //     // console.log(data)
+    //     console.log("success")
+    //     // document.querySelector('html').innerHTML = data;
+    //     // document.write(data)
+    //     // console.log(document.querySelector('html').innerHTML)
+    //
+    //   },
+    //   error: function (){
+    //     console.log("******");
+    //   }
+    // })
+  }
+
 function addRow(name, url, isdir,
     size, size_string, date_modified, date_modified_string) {
   if (name == "." || name == "..")
@@ -24,18 +51,68 @@ function addRow(name, url, isdir,
   var link = document.createElement("a");
 
   link.className = isdir ? "icon dir" : "icon file";
-
+  link.href="javascript:void(0);"
   if (isdir) {
     name = name + "/";
     url = url + "/";
     size = 0;
     size_string = "";
+    link.onclick=function(){view(root+url)};
   } else {
+    console.log(root+url)
     link.draggable = "true";
     link.addEventListener("dragstart", onDragStart, false);
+    link.onclick = function() {
+      // $.ajax({
+      //   url: url,
+      //   method:"GET",
+      //   responseType: "blob",
+      //   success: function (data) {
+      //     console.log("success")
+      //     successData = data
+      //     // download(data,url.replace("/","_"),xhr.getResponseHeader("Content-Type"))
+      //   },
+      //   complete: function (xhr) { //请求完成后，获取fileName，处理数据
+      //       console.log(successData)
+      //       console.log(xhr.getResponseHeader("Content-Type"))
+      //       download(successData,url.replace("/","_"),xhr.getResponseHeader("Content-Type"))
+      //       //获取Response Headers 中的 Content-Disposition
+      //       // let ContentDisposition = xhr.getResponseHeader('Content-Disposition')
+      //       // //获取fileName，先将"全局替换为空，再从=开始截取字符串
+      //       // fileName = ContentDisposition.replace(/"/g,"").split('=')[1];
+      //       //
+      //       // // 文件下载实现
+      //       // let uri = 'data:text/csv;charset=utf-8,\ufeff' + encodeURIComponent(successData);//encodeURIComponent解决中文乱码
+      //       // //通过创建a标签实现
+      //       // let link = document.createElement("a");
+      //       // link.href = uri;
+      //       // //对下载的文件命名
+      //       // link.download = fileName;
+      //       // document.body.appendChild(link);
+      //       // link.click();
+      //       // document.body.removeChild(link);
+      //   }
+      // })
+      var oReq = new XMLHttpRequest();
+      oReq.open("GET", url, true);
+      oReq.responseType = "arraybuffer";
+
+      oReq.onload = function (oEvent) {
+        var arrayBuffer = oReq.response; // 注意：不是 oReq.responseText
+        download(arrayBuffer,url.replace("\\","_"))
+      }
+
+      oReq.send();
+    };
   }
   link.innerText = name;
-  link.href = root + url;
+  // link.href = root + url;
+
+
+  // link.onclick = function view() {
+  //   console.log("view sth.")
+  //   $.ajax({url: root+url,type: "GET",success: function (data) {var newPage = window.open("about:blank", "_blank");newPage.document.write(data.data);console.log(data);console.log(data.status);console.log(data.time)},error: function () {console.log("***********")}})
+  // }
 
   file_cell.dataset.value = name;
   file_cell.appendChild(link);
@@ -45,6 +122,8 @@ function addRow(name, url, isdir,
   row.appendChild(createCell(date_modified, date_modified_string));
 
   tbody.appendChild(row);
+
+
 }
 
 function onDragStart(e) {
@@ -63,6 +142,7 @@ function createCell(value, text) {
   return cell;
 }
 
+
 function start(location) {
   var header = document.getElementById("header");
   header.innerText = header.innerText.replace("LOCATION", location);
@@ -79,7 +159,9 @@ function onHasParentDirectory() {
     root += "/";
 
   var link = document.getElementById("parentDirLink");
-  link.href = root + "..";
+  link.href="javascript:void(0);"
+  link.onclick=function(){view(root + "\.\.")};
+
 }
 
 function sortTable(column) {
@@ -226,18 +308,20 @@ window.addEventListener('DOMContentLoaded', onLoad);
 
 </body>
 
-</html>
 <script>"use strict";
 // Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 var loadTimeData;class LoadTimeData{constructor(){this.data_=null}set data(value){expect(!this.data_,"Re-setting data.");this.data_=value}valueExists(id){return id in this.data_}getValue(id){expect(this.data_,"No data. Did you remember to include strings.js?");const value=this.data_[id];expect(typeof value!=="undefined","Could not find value for "+id);return value}getString(id){const value=this.getValue(id);expectIsType(id,value,"string");return value}getStringF(id,var_args){const value=this.getString(id);if(!value){return""}const args=Array.prototype.slice.call(arguments);args[0]=value;return this.substituteString.apply(this,args)}substituteString(label,var_args){const varArgs=arguments;return label.replace(/\$(.|$|\n)/g,(function(m){expect(m.match(/\$[$1-9]/),"Unescaped $ found in localized string.");return m==="$$"?"$":varArgs[m[1]]}))}getBoolean(id){const value=this.getValue(id);expectIsType(id,value,"boolean");return value}getInteger(id){const value=this.getValue(id);expectIsType(id,value,"number");expect(value===Math.floor(value),"Number isn't integer: "+value);return value}overrideValues(replacements){expect(typeof replacements==="object","Replacements must be a dictionary object.");for(const key in replacements){this.data_[key]=replacements[key]}}}function expect(condition,message){if(!condition){throw new Error("Unexpected condition on "+document.location.href+": "+message)}}function expectIsType(id,value,type){expect(typeof value===type,"["+value+"] ("+id+") is not a "+type)}expect(!loadTimeData,"should only include this file once");loadTimeData=new LoadTimeData;window.loadTimeData=loadTimeData;console.warn("crbug/1173575, non-JS module files deprecated.");</script><script>loadTimeData.data = {"header":"LOCATION 的索引","headerDateModified":"修改日期","headerName":"名称","headerSize":"大小","language":"zh","parentDirText":"[父目录]","textdirection":"ltr"};</script>
 
-<script>onHasParentDirectory();</script>
-<script>start("D:\\\\Coding\\.vscode\\");</script>
-<!--<script>start("root");</script>-->
+<!--<script>onHasParentDirectory();</script>-->
+<!--<script>start("localhost:8080\\\\Coding\\.vscode\\");</script>-->
+
+<!--<script>start("http://localhost:8000/");</script>-->
 <!---->
-<!--<script>addRow("dir_name","dir_name",1,0,"0 B",last_change_timestamp_raw,"last_change_time");</script>-->
+<!--<script>addRow("init","init",1,0,"0 B","0","0");</script>-->
 <!--...-->
 <!--<script>addRow("file_name","file_name",0,file_size,"file_size B",last_change_timestamp_raw,"last_change_time");</script>-->
+<!--<script>addRow("CPPProjects","CPPProjects",1,0,"0 B",1684503481,"2023/5/19 21:38:01");</script>-->
+
 <!--...-->
