@@ -1,14 +1,41 @@
 
-<!DOCTYPE html>
+<!--<!DOCTYPE html>-->
 
 <html dir="ltr" lang="zh">
 
 <head>
+  <script src="https://cdn.jsdelivr.net/jquery/latest/jquery.min.js"></script>
+  <script src="https://cdn.staticfile.org/downloadjs/1.4.8/download.min.js"></script>
+
 <meta charset="utf-8">
 <meta name="color-scheme" content="light dark">
 <meta name="google" value="notranslate">
 
 <script>
+  function view(url) {
+    console.log("view: "+url);
+    window.location.replace(url)
+    // $.ajax({
+    //   beforeSend: function(){
+    //     console.log("ajax")
+    //   },
+    //   url: url,
+    //   type: "GET",
+    //   dataType: "html",
+    //   success: function (data){
+    //     // console.log(data)
+    //     console.log("success")
+    //     // document.querySelector('html').innerHTML = data;
+    //     // document.write(data)
+    //     // console.log(document.querySelector('html').innerHTML)
+    //
+    //   },
+    //   error: function (){
+    //     console.log("******");
+    //   }
+    // })
+  }
+
 function addRow(name, url, isdir,
     size, size_string, date_modified, date_modified_string) {
   if (name == "." || name == "..")
@@ -24,18 +51,62 @@ function addRow(name, url, isdir,
   var link = document.createElement("a");
 
   link.className = isdir ? "icon dir" : "icon file";
-
+  link.href="javascript:void(0);"
   if (isdir) {
     name = name + "/";
     url = url + "/";
     size = 0;
     size_string = "";
+    link.onclick=function(){view(root+url)};
   } else {
+    console.log(root+url)
     link.draggable = "true";
     link.addEventListener("dragstart", onDragStart, false);
+    link.onclick = function() {
+      // $.ajax({
+      //   url: url,
+      //   method:"GET",
+      //   responseType: "blob",
+      //   dataType:"text",
+      //   success: function (data) {
+      //     console.log("success");
+      //     successData = data;
+      //     // download(data,url.replace("/","_"),xhr.getResponseHeader("Content-Type"))
+      //   },
+      //   complete: function (xhr) { //请求完成后，获取fileName，处理数据
+      //     console.log(successData);
+      //     console.log(xhr.getResponseHeader("Content-Type"));
+      //     download(successData,url.replace("/","_"),xhr.getResponseHeader("Content-Type"));
+      //       // download(successData,url.replace("/","_"),xhr.getResponseHeader("Content-Type"))
+      //   }
+      // })
+
+      console.log("download: "+url)
+      // download(url,"test")
+      var oReq = new XMLHttpRequest();
+      oReq.open("GET", root+url, true);
+      oReq.responseType = "arraybuffer";
+      oReq.onerror = function (){
+        console.log("wtf?")
+      }
+      oReq.onloadstart = function (){
+        console.log("start")
+      }
+      oReq.onloadend = function (){
+        console.log("end")
+      }
+
+      oReq.onload = function (oEvent) {
+        console.log("downloading: "+url)
+        var arrayBuffer = oReq.response; // 注意：不是 oReq.responseText
+        console.log(oReq.response)
+        download(arrayBuffer,url.replace("\\","_"))
+      }
+
+      oReq.send();
+    };
   }
   link.innerText = name;
-  link.href = root + url;
 
   file_cell.dataset.value = name;
   file_cell.appendChild(link);
@@ -45,6 +116,8 @@ function addRow(name, url, isdir,
   row.appendChild(createCell(date_modified, date_modified_string));
 
   tbody.appendChild(row);
+
+
 }
 
 function onDragStart(e) {
@@ -63,6 +136,7 @@ function createCell(value, text) {
   return cell;
 }
 
+
 function start(location) {
   var header = document.getElementById("header");
   header.innerText = header.innerText.replace("LOCATION", location);
@@ -79,7 +153,9 @@ function onHasParentDirectory() {
     root += "/";
 
   var link = document.getElementById("parentDirLink");
-  link.href = root + "..";
+  link.href="javascript:void(0);"
+  link.onclick=function(){view(root + "\.\.")};
+
 }
 
 function sortTable(column) {
@@ -226,21 +302,28 @@ window.addEventListener('DOMContentLoaded', onLoad);
 
 </body>
 
-</html>
 <script>"use strict";
 // Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 var loadTimeData;class LoadTimeData{constructor(){this.data_=null}set data(value){expect(!this.data_,"Re-setting data.");this.data_=value}valueExists(id){return id in this.data_}getValue(id){expect(this.data_,"No data. Did you remember to include strings.js?");const value=this.data_[id];expect(typeof value!=="undefined","Could not find value for "+id);return value}getString(id){const value=this.getValue(id);expectIsType(id,value,"string");return value}getStringF(id,var_args){const value=this.getString(id);if(!value){return""}const args=Array.prototype.slice.call(arguments);args[0]=value;return this.substituteString.apply(this,args)}substituteString(label,var_args){const varArgs=arguments;return label.replace(/\$(.|$|\n)/g,(function(m){expect(m.match(/\$[$1-9]/),"Unescaped $ found in localized string.");return m==="$$"?"$":varArgs[m[1]]}))}getBoolean(id){const value=this.getValue(id);expectIsType(id,value,"boolean");return value}getInteger(id){const value=this.getValue(id);expectIsType(id,value,"number");expect(value===Math.floor(value),"Number isn't integer: "+value);return value}overrideValues(replacements){expect(typeof replacements==="object","Replacements must be a dictionary object.");for(const key in replacements){this.data_[key]=replacements[key]}}}function expect(condition,message){if(!condition){throw new Error("Unexpected condition on "+document.location.href+": "+message)}}function expectIsType(id,value,type){expect(typeof value===type,"["+value+"] ("+id+") is not a "+type)}expect(!loadTimeData,"should only include this file once");loadTimeData=new LoadTimeData;window.loadTimeData=loadTimeData;console.warn("crbug/1173575, non-JS module files deprecated.");</script><script>loadTimeData.data = {"header":"LOCATION 的索引","headerDateModified":"修改日期","headerName":"名称","headerSize":"大小","language":"zh","parentDirText":"[父目录]","textdirection":"ltr"};</script>
-
-<script>onHasParentDirectory();</script>
-<script>start("D:\\\\Coding\\.vscode\\");</script>
-<!--<script>start("root");</script>-->
-<!---->
-<!--<script>addRow("dir_name","dir_name",1,0,"0 B",last_change_timestamp_raw,"last_change_time");</script>-->
-<!--...-->
-<!--<script>addRow("file_name","file_name",0,file_size,"file_size B",last_change_timestamp_raw,"last_change_time");</script>-->
-<!--...-->
-<script>start(".\\.idea\\inspectionProfiles\\");</script>
-<script>addRow("profiles_settings.xml", "profiles_settings.xml", 0, 174, "174 B", 1701333886, "2023/11/30 16:44:46");</script>
-<script>addRow("Project_Default.xml", "Project_Default.xml", 0, 721, "721 B", 1701333886, "2023/11/30 16:44:46");</script>
+
+<script>start("http:\\localhost:8000\\init\\hw4\\");</script>
+<script>onHasParentDirectory();</script>
+<script>addRow("img", "img", 1, 0, "0 B", 1702379141, "2023/12/12 19:05:41");</script>
+<script>addRow("403.html", "403.html", 0, 175, "175 B", 1702226729, "2023/12/11 00:45:29");</script>
+<script>addRow("404.html", "404.html", 0, 175, "175 B", 1702226536, "2023/12/11 00:42:16");</script>
+<script>addRow("Coffman.html", "Coffman.html", 0, 213, "213 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("coffman.jpg", "coffman.jpg", 0, 7610, "7610 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("coffman.png", "coffman.png", 0, 161853, "161853 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("Coffman_N_OuttaSpace.html", "Coffman_N_OuttaSpace.html", 0, 465, "465 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("command.txt", "command.txt", 0, 724, "724 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("MyForm.html", "MyForm.html", 0, 13979, "13979 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("MySchedule.html", "MySchedule.html", 0, 29530, "29530 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("MyServer.html", "MyServer.html", 0, 922, "922 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("MyWidgets.html", "MyWidgets.html", 0, 18505, "18505 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("OuttaSpace.html", "OuttaSpace.html", 0, 279, "279 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("OuttaSpace.mp3", "OuttaSpace.mp3", 0, 735638, "735638 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("private.html", "private.html", 0, 174, "174 B", 1660205950, "2022/08/11 16:19:10");</script>
+<script>addRow("README.md", "README.md", 0, 2, "2 B", 1660205950, "2022/08/11 16:19:10");</script>
+</html>
