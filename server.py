@@ -19,7 +19,7 @@ SCHEME = "http/1.1"
 MIME_TYPE = {
     "html": "text/html"
 }
-CHUNK_SIZE = 1024 * 20
+CHUNK_SIZE = 1024 * 3
 user_dict = {
     "test": "123456"
 }
@@ -123,7 +123,7 @@ class server:
             print(1)
             response = response.encode('utf-8')
         print("send")
-        client_socket.send(response)
+        client_socket.sendall(response)
 
     def handle_first_req(self, client_socket, req):
 
@@ -234,13 +234,13 @@ class server:
         print(f"download: {decoded_url['path']}")
         ftype = mimetypes.guess_type(path_)[0]
         content = path_.open('rb').read()
-        return self.download_regular(content, ftype)
+        # return self.download_regular(content, ftype)
 
-        # q_dict = decoded_url["queries_dict"]
-        # if q_dict is None or q_dict.get("chunk") is None or q_dict["chunked"] != 1:
-        #     return self.download_regular(content, ftype)
-        # else:
-        #     return self.send_chunked(client_socket, content, ftype)
+        q_dict = decoded_url["queries_dict"]
+        if q_dict is None or q_dict.get("chunk") is None or q_dict["chunked"] != 1:
+            return self.download_regular(content, ftype)
+        else:
+            return self.send_chunked(client_socket, content, ftype)
 
     @staticmethod
     def download_regular(content, mime_type) -> bytes:
@@ -251,11 +251,7 @@ class server:
         resp.set_keep_alive()
         resp.body = content
         out = resp.build_byte()
-        # response = 'HTTP/1.1 200 OK\r\n'  # 模拟相应行
-        # response += 'Content-Type:text/html\r\n'  # 模拟响应头
-        # response += '<h1>Sorry...</h1>'  # 模拟响应体
-        # response += '\r\n'
-        # out = response.encode()
+
 
         return out
 
@@ -268,14 +264,34 @@ class server:
         resp.body = None
 
         resp_chunk = Response()
+        if type(content).__name__()=="str":
+            content = content.encode()
         pointer = 0
-        while pointer < len(content):
-            chunk_data = content[pointer:pointer + CHUNK_SIZE]
+        rest_len = len(content)
+        while rest_len - CHUNK_SIZE > 0:
+            chunk_data = str(CHUNK_SIZE)
+            chunk_data += NEWLINE
+            chunk_data += content[pointer:pointer + CHUNK_SIZE]
+            chunk_data += NEWLINE
             pointer += CHUNK_SIZE
-            resp_chunk.body = chunk_data
-            self.send(client_socket, resp_chunk.build())
+            rest_len -= CHUNK_SIZE
 
-        raise NotImplementedError("")
+            resp_chunk.body = chunk_data
+            self.send(client_socket, resp_chunk._build())
+
+        chunk_data = str(rest_len)
+        chunk_data += NEWLINE
+        chunk_data += content[pointer:pointer + CHUNK_SIZE]
+        chunk_data += NEWLINE
+        resp_chunk.body = chunk_data
+        self.send(client_socket, resp_chunk._build())
+
+        chunk_data = str(0)
+        chunk_data += NEWLINE
+        resp_chunk.body = chunk_data.encode()
+        self.send(client_socket, resp_chunk._build())
+
+        return
         # return
 
     @staticmethod
