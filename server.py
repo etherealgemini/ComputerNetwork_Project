@@ -35,7 +35,7 @@ def url_decoder(url: str) -> dict[str]:
 
     net_location: bb.sustech.edu.cn
 
-    path: /webapps/blackboard/content/listContent.jsp
+    path: /webappsackboard/contentstContent.jsp
 
     params: null
 
@@ -51,10 +51,10 @@ def url_decoder(url: str) -> dict[str]:
     scheme, r = url.split("://", 1) if "://" in url else ("", url)
     net_location, r = r.split("/", 1) if "/" in r else (r, "")
     path, r = ("/" + r).split("?", 1) if "?" in r else (r, "")
-    params, r = r.split("?", 1) if "?" in r else (r, "")
+    # params, r = r.split("?", 1) if "?" in r else (r, "")
     query, fragment = r.split("#", 1) if "#" in r else (r, "")
     target = path.split("/")[-1]
-    queries = query.split("&") if "&" in query else list(query)
+    queries = query.split("&") if "&" in query else [query]
     queries_dict = dict()
     for q in queries:
         key, value = q.split("=")
@@ -63,7 +63,7 @@ def url_decoder(url: str) -> dict[str]:
         "scheme": scheme,
         "net_location": net_location,
         "path": path,
-        "params": params,
+        # "params": params,
         "query": query,
         "fragment": fragment,
         "target": target,
@@ -197,6 +197,7 @@ class server:
             url = request_line[1]
 
             decoded_url = url_decoder(url)
+            print(decoded_url)
             # self.session_worker(decoded_url)
         except IndexError:
             a = 1
@@ -219,6 +220,7 @@ class server:
         return body
 
     def post_request(self, client_socket, decoded_url, body):
+        print(decoded_url["target"]+'是')
 
         if decoded_url["target"] == "upload":
             return self.upload(decoded_url, body)
@@ -228,7 +230,7 @@ class server:
             return self.not_supported_request()
 
     def download(self, client_socket, decoded_url):
-        path = decoded_url['path']
+        path = decoded_url["queries_dict"['path']]
         path = DATA_ROOT + "\\\\" + path.replace("\\", "\\\\")
         path_ = Path(path)
         print(f"download: {decoded_url['path']}")
@@ -316,8 +318,15 @@ class server:
         path = decoded_url['path']
         path = DATA_ROOT + path.replace("\\", "\\\\")
         path_ = Path(path)
-        path_.open('wb').write(body)
-        pass
+        path_.open('wb').write(body.encode())
+        file_size=len(body)
+        response = Response()
+        response.set_status_line(SCHEME, 200, "OK")
+        response.set_content_type("text/plain", "")
+        response.set_content_length(file_size)
+        response.set_keep_alive()
+        response.body = None
+        return response.build()
 
     def delete(self, decoded_url):
         print(f"delete file at \"{decoded_url['params']}\"")
