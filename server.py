@@ -8,7 +8,7 @@ from pathlib import Path
 import socket
 import threading
 from util import *
-
+import numpy as np
 # 运行后，将在路径D:\\temp\pythonServer创建根目录文件夹，浏览器中运行http:\\localhost:8000\查看
 
 NEWLINE = "\r\n"
@@ -19,10 +19,12 @@ SCHEME = "http/1.1"
 MIME_TYPE = {
     "html": "text/html"
 }
-CHUNK_SIZE = 1024 * 3
+CHUNK_SIZE = 1024
 user_dict = {
     "test": "123456"
 }
+session_dict = dict()
+rng = np.random.default_rng()
 
 
 def url_decoder(url: str) -> dict[str]:
@@ -35,7 +37,7 @@ def url_decoder(url: str) -> dict[str]:
 
     net_location: bb.sustech.edu.cn
 
-    path: /webappsackboard/contentstContent.jsp
+    path: /webapps/blackboard/content/listContent.jsp
 
     params: null
 
@@ -57,7 +59,8 @@ def url_decoder(url: str) -> dict[str]:
     queries = query.split("&") if "&" in query else [query]
     queries_dict = dict()
     for q in queries:
-        key, value = q.split("=")
+        key_value= q.split('=') if "=" in q else [None,None]
+        key,value = key_value[0],key_value[1]
         queries_dict[key] = value
     return {
         "scheme": scheme,
@@ -127,7 +130,7 @@ class server:
 
     def handle_first_req(self, client_socket, req):
 
-        auth_flag = self.check_auth(req)
+        auth_flag,_ = self.check_auth(req)
 
         if auth_flag:
             self.send(client_socket, self.handle_request(client_socket, req))
@@ -138,12 +141,13 @@ class server:
 
         data = client_socket.recv(4096)
         req = data.decode("utf-8")
-        auth_flag = self.check_auth(req)
+        auth_flag,username = self.check_auth(req)
 
         if not auth_flag:
             self.send(client_socket, self.unAuthorized())
             client_socket.close()
-        self.send(client_socket, self.pass_auth())
+
+        self.send(client_socket, self.pass_auth(username))
         return
 
     @staticmethod
@@ -152,27 +156,40 @@ class server:
         headers_ = temp[0]
         headers = headers_.split(NEWLINE)
         auth_flag = False
+        usr_name = None
         for header in headers:
-            if not header.__contains__("Authorization"):
-                continue
-            auth_flag = True
-            _, r = header.split(":")
-            temp = r.split(" ")
-            if len(temp) < 2:
-                auth_flag = False
+            if header.__contains__("Authorization"):
+                _, r = header.split(":")
+                temp = r.split(" ")
+                if len(temp) < 2:
+                    auth_flag = False
+                    break
+                auth_method, code = temp[0], temp[len(temp) - 1]
+                temp = base64.b64decode(code).decode("utf-8").split(":")
+                print(temp)
+                if len(temp) < 2:
+                    auth_flag = False
+                    break
+                usr_name, pw = temp[0], temp[1]
+                if user_dict[usr_name] != pw:
+                    auth_flag = False
+                    break
+                auth_flag = True
                 break
-            auth_method, code = temp[0], temp[len(temp) - 1]
-            temp = base64.b64decode(code).decode("utf-8").split(":")
-            print(temp)
-            if len(temp) < 2:
-                auth_flag = False
+            elif header.__contains__("Cookie"):
+                _, cookie = header.split(":")
+                temp = cookie.split(":")
+                if len(temp) < 2:
+                    auth_flag = False
+                    break
+                session_id, value = temp[0], temp[len(temp) - 1]
+                if session_dict[session_id] != value:
+                    auth_flag = False
+                    break
+                auth_flag = True
                 break
-            usr_name, pw = temp[0], temp[1]
-            if user_dict[usr_name] != pw:
-                auth_flag = False
-            auth_flag = True
-            break
-        return auth_flag
+
+        return auth_flag,usr_name
 
     """
     method URL version CRLF <- request_line
@@ -197,8 +214,6 @@ class server:
             url = request_line[1]
 
             decoded_url = url_decoder(url)
-            print(decoded_url)
-            # self.session_worker(decoded_url)
         except IndexError:
             a = 1
 
@@ -220,7 +235,6 @@ class server:
         return body
 
     def post_request(self, client_socket, decoded_url, body):
-        print(decoded_url["target"]+'是')
 
         if decoded_url["target"] == "upload":
             return self.upload(decoded_url, body)
@@ -230,7 +244,7 @@ class server:
             return self.not_supported_request()
 
     def download(self, client_socket, decoded_url):
-        path = decoded_url["queries_dict"['path']]
+        path = decoded_url['path']
         path = DATA_ROOT + "\\\\" + path.replace("\\", "\\\\")
         path_ = Path(path)
         print(f"download: {decoded_url['path']}")
@@ -253,17 +267,34 @@ class server:
         resp.set_keep_alive()
         resp.body = content
         out = resp.build_byte()
-
-
         return out
 
+    def view(self,client_socket, decoded_url):
+        # if decoded_url['target'].endswith("."):
+        path = decoded_url['path']
+        path = path.replace("\\", "\\\\")
+        path = path.replace("/", "\\")
+        print(f"view: {path}")
+        html_file = generate_view_html(DATA_ROOT + "\\" + path, path, LOCATION)
+        ftype = MIME_TYPE["html"]
+
+        q_dict = decoded_url["queries_dict"]
+        if q_dict is None or q_dict.get("chunk") is None or q_dict["chunked"] != 1:
+            resp = Response()
+            resp.set_status_line(SCHEME, 200, "OK")
+            resp.set_content_type(MIME_TYPE["html"], "utf-8")
+            resp.set_keep_alive()
+            resp.body = html_file
+            return resp.build()
+        else:
+            return self.send_chunked(client_socket, html_file, ftype)
     def send_chunked(self, client_socket, content, mime_type):
-        resp = Response()
-        resp.set_status_line(SCHEME, 200, "OK")
-        resp.set_content_type(mime_type, "")
-        resp.set_keep_alive()
-        resp.set_chunked()
-        resp.body = None
+        # resp = Response()
+        # resp.set_status_line(SCHEME, 200, "OK")
+        # resp.set_content_type(mime_type, "")
+        # resp.set_keep_alive()
+        # resp.set_chunked()
+        # resp.body = None
 
         resp_chunk = Response()
         if type(content).__name__()=="str":
@@ -296,26 +327,13 @@ class server:
         return
         # return
 
-    @staticmethod
-    def view(client_socket, decoded_url):
-        # if decoded_url['target'].endswith("."):
-        path = decoded_url['path']
-        path = path.replace("\\", "\\\\")
-        path = path.replace("/", "\\")
-        print(f"view: {path}")
-        html_file = generate_view_html(DATA_ROOT + "\\" + path, path, LOCATION)
+    def send_ranged(self,client_socket,content,mime_type):
 
-        resp = Response()
-        resp.set_status_line(SCHEME, 200, "OK")
-        resp.set_content_type(MIME_TYPE["html"], "utf-8")
-        resp.set_keep_alive()
-        resp.body = html_file
-
-        # print(f"view: {decoded_url['path']}")
-        return resp.build()
+        pass
 
     def upload(self, decoded_url, body):
-        path = decoded_url['path']
+        q_dict = decoded_url["queries_dict"]
+        path = q_dict["path"]
         path = DATA_ROOT + path.replace("\\", "\\\\")
         path_ = Path(path)
         path_.open('wb').write(body.encode())
@@ -334,7 +352,11 @@ class server:
 
     def not_supported_request(self):
         print("request not supported")
-        pass
+        resp = Response()
+        resp.set_status_line(SCHEME, 400, "Bad Request")
+        resp.set_keep_alive()
+        resp.body = open("400.html", "r").read()
+        return resp.build()
 
     @staticmethod
     def authorization():
@@ -358,13 +380,16 @@ class server:
 
         pass
 
-    def pass_auth(self):
+    def pass_auth(self,usr):
         resp = Response()
         resp.set_status_line(SCHEME, 200, "OK")
         resp.set_auth()
         resp.set_keep_alive()
+        cok = hash(usr)+rng.integers(1,50)
+        resp.set_cookie(usr,cok)
+        session_dict[usr] = cok
         # resp.body = "http://localhost:8000/init"
-        resp.body = ""
+        resp.body = "http://localhost:8000/init"
         return resp.build()
 
 
@@ -400,6 +425,10 @@ class Response:
 
     def set_chunked(self):
         self.headers["Transfer-Encoding"] = "chunked"
+
+    def set_cookie(self, usr, param):
+        self.headers["Set-Cookie"] = str(usr) + ":" + str(param) + "; path=/"
+        return
 
     def remove_header(self, header: str):
         self.headers.pop(header)
@@ -444,6 +473,8 @@ class Response:
         self.message = msg
 
         return msg
+
+
 
 
 if __name__ == "__main__":
