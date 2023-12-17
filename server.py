@@ -116,7 +116,13 @@ class server:
 
     @staticmethod
     def decode_raw_data(data):
-        headers, body = data.split(b'\r\n\r\n')
+        headers_body = data.split(b'\r\n\r\n')
+        if len(headers_body) == 2:
+            headers = headers_body[0]
+            body = headers_body[1]
+        else:
+            headers = headers_body[0]
+            body = None
         headers = headers.decode("utf-8")
         req = {
             "headers": headers,
@@ -134,8 +140,10 @@ class server:
             req = self.decode_raw_data(data)
             if len(data) < 1:
                 continue
-            response = self.handle_request(client_socket, req)
+            response,isClose = self.handle_request(client_socket, req)
             self.send(client_socket, response)
+            if isClose:
+                client_socket.close()
 
             # finally:
             # client_socket.close()
@@ -157,8 +165,10 @@ class server:
         auth_flag, _ = self.check_auth(req)
 
         if auth_flag:
-            self.send(client_socket, self.handle_request(client_socket, req))
+            response,isClose = self.handle_request(client_socket, req)
+            self.send(client_socket, response)
             print("auth success")
+            if isClose:client_socket.close()
             return
 
         response = self.authorization()
@@ -173,8 +183,10 @@ class server:
             logging.info("auth failed")
             client_socket.close()
 
-        self.send(client_socket, self.pass_auth(username))
+        response, isClose = self.handle_request(client_socket, req)
+        self.send(client_socket, response)
         print("auth success")
+        if isClose: client_socket.close()
         return
 
     @staticmethod
@@ -241,6 +253,8 @@ class server:
             url = request_line[1]
 
             decoded_url = url_decoder(url)
+            isClose = headers_dict["Connection"] == "close"
+
         except IndexError:
             a = 1
 
@@ -248,10 +262,10 @@ class server:
             return
 
         if req_method == "GET" or req_method == "HEAD":
-            return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD")
+            return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"),isClose
         elif req_method == "POST":
-            return self.post_request(client_socket, decoded_url, headers_dict, body)
-        return self.not_supported_request()
+            return self.post_request(client_socket, decoded_url, headers_dict, body),isClose
+        return self.not_supported_request(),isClose
 
     @staticmethod
     def list2dict(list_):
