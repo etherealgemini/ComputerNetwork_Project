@@ -17,7 +17,7 @@ NEWLINE = "\r\n"
 FILE_ROOT = os.getcwd()
 DATA_ROOT = FILE_ROOT + "\\data"
 LOCATION = "http:\\\\localhost:8080\\"
-SCHEME = "http/1.1"
+SCHEME = "HTTP/1.1"
 MIME_TYPE = {
     "html": "text/html"
 }
@@ -265,7 +265,7 @@ class server:
             return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"), isClose
         elif req_method == "POST":
             return self.post_request(client_socket, decoded_url, headers_dict, body), isClose
-        return self.not_supported_request(), isClose
+        return self.method_not_allowed(), isClose
 
     @staticmethod
     def list2dict(list_):
@@ -293,7 +293,7 @@ class server:
         elif decoded_url['target'] == "delete":
             return self.delete(decoded_url)
         else:
-            return self.not_supported_request()
+            return self.method_not_allowed()
 
     def download(self, client_socket, decoded_url, headers_dict, isHead):
         path = decoded_url['path']
@@ -301,9 +301,11 @@ class server:
         path_ = Path(path)
         print(f"download: {decoded_url['path']}")
         ftype = mimetypes.guess_type(path_)[0]
-        content = path_.open('rb').read()
+        try:
+            content = path_.open('rb').read()
         # return self.download_regular(content, ftype)
-
+        except FileNotFoundError:
+            return self.bad_request()
         q_dict = decoded_url["queries_dict"]
         if q_dict is None or q_dict.get("chunk") is None or q_dict["chunked"] != 1:
             return self.download_regular(content, ftype, isHead, headers_dict)
@@ -443,13 +445,13 @@ class server:
         print(f"delete file at \"{decoded_url['params']}\"")
         pass
 
-    def not_supported_request(self):
-        print("request not supported")
-        resp = Response()
-        resp.set_status_line(SCHEME, 400, "Bad Request")
-        # resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
-        resp.body = open("400.html", "r").read()
-        return resp.build()
+    # def not_supported_request(self):
+    #     print("request not supported")
+    #     resp = Response()
+    #     resp.set_status_line(SCHEME, 400, "Bad Request")
+    #     # resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
+    #     resp.body = open("400.html", "r").read()
+    #     return resp.build()
 
     @staticmethod
     def authorization():
@@ -482,6 +484,20 @@ class server:
         resp.set_cookie(usr, cok)
         session_dict[usr] = cok
         resp.body = ""
+        return resp.build()
+
+    def bad_request(self):
+        resp = Response()
+        resp.set_status_line(SCHEME, 400, "Bad Request")
+        resp.set_content_type(MIME_TYPE['html'],"utf-8")
+        resp.body = open('400.html',"r").read()
+        return resp.build()
+
+    def method_not_allowed(self):
+        resp = Response()
+        resp.set_status_line(SCHEME, 405, "METHOD NOT ALLOWED")
+        resp.set_content_type(MIME_TYPE['html'], "utf-8")
+        resp.body = open('405.html', "r").read()
         return resp.build()
 
 
