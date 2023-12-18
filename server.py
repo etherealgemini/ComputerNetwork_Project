@@ -140,7 +140,7 @@ class server:
             req = self.decode_raw_data(data)
             if len(data) < 1:
                 continue
-            response,isClose = self.handle_request(client_socket, req)
+            response, isClose = self.handle_request(client_socket, req)
             self.send(client_socket, response)
             if isClose:
                 client_socket.close()
@@ -160,15 +160,15 @@ class server:
         print("send")
         client_socket.sendall(response)
 
-    def handle_first_req(self, client_socket, req:dict):
+    def handle_first_req(self, client_socket, req: dict):
 
         auth_flag, _ = self.check_auth(req)
 
         if auth_flag:
-            response,isClose = self.handle_request(client_socket, req)
+            response, isClose = self.handle_request(client_socket, req)
             self.send(client_socket, response)
             print("auth success")
-            if isClose:client_socket.close()
+            if isClose: client_socket.close()
             return
 
         response = self.authorization()
@@ -190,7 +190,7 @@ class server:
         return
 
     @staticmethod
-    def check_auth(req:dict) -> (bool, None | str):
+    def check_auth(req: dict) -> (bool, None | str):
         headers_ = req["headers"]
         headers = headers_.split(NEWLINE)
         auth_flag = False
@@ -244,7 +244,7 @@ class server:
     def handle_request(self, client_socket, req, isHead=False):
         try:
             header = req["headers"]
-            body:bytes
+            body: bytes
             body = req["body"]
             headers = header.split(NEWLINE)
             headers_dict = self.list2dict(headers)
@@ -253,7 +253,7 @@ class server:
             url = request_line[1]
 
             decoded_url = url_decoder(url)
-            isClose = headers_dict["Connection"] == "close"
+            isClose = headers_dict.get("Connection") is None or headers_dict["Connection"] == "close"
 
         except IndexError:
             a = 1
@@ -262,10 +262,10 @@ class server:
             return
 
         if req_method == "GET" or req_method == "HEAD":
-            return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"),isClose
+            return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"), isClose
         elif req_method == "POST":
-            return self.post_request(client_socket, decoded_url, headers_dict, body),isClose
-        return self.not_supported_request(),isClose
+            return self.post_request(client_socket, decoded_url, headers_dict, body), isClose
+        return self.not_supported_request(), isClose
 
     @staticmethod
     def list2dict(list_):
@@ -274,7 +274,7 @@ class server:
             k_v = l.split(":") if ":" in l else None
             if k_v is None:
                 continue
-            k, v = k_v[0], k_v[1]
+            k, v = k_v[0], k_v[1].strip()
             dict_[k] = v
         return dict_
 
@@ -286,7 +286,7 @@ class server:
             body = self.view(client_socket, decoded_url, headers, isHead)
         return body
 
-    def post_request(self, client_socket, decoded_url, headers_dict, body:bytes):
+    def post_request(self, client_socket, decoded_url, headers_dict, body: bytes):
 
         if decoded_url['target'] == "upload":
             return self.upload(decoded_url, body)
@@ -306,17 +306,17 @@ class server:
 
         q_dict = decoded_url["queries_dict"]
         if q_dict is None or q_dict.get("chunk") is None or q_dict["chunked"] != 1:
-            return self.download_regular(content, ftype, isHead)
+            return self.download_regular(content, ftype, isHead, headers_dict)
         else:
-            return self.send_chunked(client_socket, content, ftype)
+            return self.send_chunked(client_socket, content, ftype, headers_dict)
 
     @staticmethod
-    def download_regular(content, mime_type, isHead) -> bytes:
+    def download_regular(content, mime_type, isHead, headers_dict) -> bytes:
         resp = Response()
         resp.set_status_line(SCHEME, 200, "OK")
         # print(mimetypes.guess_type(path)[0])
         resp.set_content_type(mime_type, "")
-        resp.set_keep_alive()
+        resp.set_keep_alive(headers_dict.get('Connect') != "close")
         resp.body = content
         out = resp.build_byte()
         return out
@@ -331,23 +331,24 @@ class server:
         ftype = MIME_TYPE["html"]
 
         q_dict = decoded_url["queries_dict"]
+
         if q_dict is None or len(q_dict) < 1:
             resp = Response()
             resp.set_status_line(SCHEME, 200, "OK")
             resp.set_content_type(MIME_TYPE["html"], "utf-8")
-            resp.set_keep_alive()
+            resp.set_keep_alive(headers_dict.get('Connect') != "close")
             resp.body = html_file
             return resp.build()
         elif q_dict.get("chunk") is not None and q_dict["chunked"] == 1:
-            return self.send_chunked(client_socket, html_file, ftype)
+            return self.send_chunked(client_socket, headers_dict, html_file, ftype)
         elif headers_dict.get("Range") is not None:
-            return self.send_ranged(client_socket, html_file, ftype, headers_dict["Range"])
+            return self.send_ranged(client_socket, headers_dict, html_file, ftype, headers_dict["Range"])
 
-    def send_chunked(self, client_socket, content, mime_type):
+    def send_chunked(self, client_socket, headers_dict, content, mime_type):
         # resp = Response()
         # resp.set_status_line(SCHEME, 200, "OK")
         # resp.set_content_type(mime_type, "")
-        # resp.set_keep_alive()
+        # resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
         # resp.set_chunked()
         # resp.body = None
 
@@ -377,15 +378,16 @@ class server:
         chunk_data = str(0)
         chunk_data += NEWLINE
         resp_chunk.body = chunk_data.encode()
+        resp_chunk.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
         self.send(client_socket, resp_chunk._build())
 
         return
         # return
 
-    def send_ranged(self, client_socket, content, mime_type_, range_):
+    def send_ranged(self, client_socket, content, headers_dict, mime_type_, range_):
         logging.info("Range send triggered")
         resp_ranged = Response()
-        resp_ranged.set_keep_alive()
+        resp_ranged.set_keep_alive(headers_dict.get('Connect') != "close")
         resp_ranged.set_accept_ranges()
         resp_ranged.set_status_line(SCHEME, 206, "Partial Content")
         if type(content).__name__() == "str":
@@ -421,8 +423,8 @@ class server:
         #     resp_ranged.set_ranged(pointer,pointer+next_range,file_size)
         return
 
-    def upload(self, decoded_url, body_:bytes):
-        body = body_.decode() #TODO
+    def upload(self, decoded_url, body_: bytes):
+        body = body_.decode()  # TODO
         q_dict = decoded_url["queries_dict"]
         path = q_dict["path"]
         path = DATA_ROOT + path.replace("\\", "\\\\")
@@ -433,7 +435,7 @@ class server:
         response.set_status_line(SCHEME, 200, "OK")
         response.set_content_type("text/plain", "")
         response.set_content_length(file_size)
-        response.set_keep_alive()
+        response.set_keep_alive(headers_dict.get('Connect') != "close")
         response.body = None
         return response.build()
 
@@ -445,7 +447,7 @@ class server:
         print("request not supported")
         resp = Response()
         resp.set_status_line(SCHEME, 400, "Bad Request")
-        resp.set_keep_alive()
+        # resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
         resp.body = open("400.html", "r").read()
         return resp.build()
 
@@ -454,7 +456,7 @@ class server:
         resp = Response()
         resp.set_status_line(SCHEME, 401, "Unauthorized")
         resp.set_auth()
-        resp.set_keep_alive()
+        # resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
         resp.body = open("401.html", "r").read()
         return resp.build()
 
@@ -475,7 +477,7 @@ class server:
         resp = Response()
         resp.set_status_line(SCHEME, 200, "OK")
         resp.set_auth()
-        resp.set_keep_alive()
+        resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
         cok = hash(usr) + rng.integers(1, 50)
         resp.set_cookie(usr, cok)
         session_dict[usr] = cok
