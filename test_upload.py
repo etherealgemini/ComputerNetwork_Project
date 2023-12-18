@@ -14,7 +14,7 @@ with open(file_path, "rb") as f:
 content_length = len(file_content)
 
 # 定义请求头，指定内容类型为 text/html
-headers = "Content-Type: text/html\r\n"
+headers = "Content-Type: text\r\nContent-Disposition: attachment; filename=ybb.txt\r\n"
 
 # 构造 HTTP 请求报文，注意要以 \r\n 结尾
 request = f"POST {url} / HTTP/1.1\r\nAuthorization: Basic dGVzdDoxMjM0NTY=\r\n{headers}Content-Length: {content_length}\r\n\r\n".encode("utf-8") + file_content
@@ -23,7 +23,7 @@ request = f"POST {url} / HTTP/1.1\r\nAuthorization: Basic dGVzdDoxMjM0NTY=\r\n{h
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
 # 连接到服务器的 IP 地址和端口号，可以根据需要修改
-s.connect(("127.0.0.1", 8000))
+s.connect(("127.0.0.1", 8080))
 
 # 发送请求报文
 s.sendall(request)
