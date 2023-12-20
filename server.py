@@ -331,21 +331,35 @@ class server:
         path = path.replace("\\", "\\\\")
         path = path.replace("/", "\\")
         print(f"view: {path}")
-        html_file = generate_view_html(DATA_ROOT + "\\" + path, path, LOCATION)
+        local_path = DATA_ROOT + "\\" + path
+        html_file = generate_view_html(local_path, path, LOCATION)
         ftype = MIME_TYPE["html"]
 
-        q_dict = decoded_url["queries_dict"]
-        if q_dict is None or len(q_dict) < 1:
+        q_dict = decoded_url['queries_dict']
+        if q_dict is None or q_dict.get('SUSTech-HTTP') is None or q_dict.get('SUSTech-HTTP')=='0' or isHead:
             resp = Response()
             resp.set_status_line(SCHEME, 200, "OK")
-            resp.set_content_type(MIME_TYPE["html"], "utf-8")
-            resp.set_keep_alive()
-            resp.body = html_file
+            if not isHead:
+                resp.set_content_type(MIME_TYPE['html'], "utf-8")
+                resp.body = html_file
+            else:
+                resp.body = ""
+            print("view get html")
             return resp.build()
-        elif q_dict.get("chunk") is not None and q_dict["chunked"] == 1:
+        if q_dict.get('SUSTech-HTTP')=='1':
+            resp = Response()
+            resp.set_status_line(SCHEME, 200, "OK")
+            resp.set_content_type("text/plain","utf-8")
+            resp.body = walk(local_path)
+            print("view get list")
+            return resp.build()
+        if q_dict.get("chunk") is not None and q_dict["chunked"] == 1:
             return self.send_chunked(client_socket, html_file, ftype)
         elif headers_dict.get("Range") is not None:
             return self.send_ranged(client_socket, html_file, ftype, headers_dict["Range"])
+
+
+
 
     def send_chunked(self, client_socket, content, mime_type):
         # resp = Response()
@@ -427,7 +441,7 @@ class server:
 
     def upload(self, decoded_url, body_:bytes,headers):
         pattern = re.compile(r"filename=(.+)")
-        match = pattern.search(headers['Content-Disposition'])
+        match = pattern.search(headers.get('Content-Disposition'))
         if match:
            file_name = match.group(1)
            print(file_name)
