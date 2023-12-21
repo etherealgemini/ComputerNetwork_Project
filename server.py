@@ -1,17 +1,15 @@
-from ast import walk
 import base64
-import chunk
-import copy
 import logging
 import mimetypes
-import mimetypes as mime
-import os
-from pathlib import Path
 import re
 import socket
 import threading
-from util import *
+from ast import walk
+from pathlib import Path
+
 import numpy as np
+
+from util import *
 
 # 运行后，将在路径D:\\temp\pythonServer创建根目录文件夹，浏览器中运行http:\\localhost:8000\查看
 os.environ['PYTHONUTF8'] = '1'
@@ -118,7 +116,6 @@ class server:
     """
 
     @staticmethod
-
     def decode_raw_data(data):
         # 使用正则表达式准确定位头部和主体的位置
         headers_body_match = re.search(b'\r\n\r\n', data)
@@ -141,7 +138,6 @@ class server:
 
         return req
 
-
     def handle_conn(self, client_socket: socket.socket, client_address: tuple):
         data = client_socket.recv(4096)
         req = self.decode_raw_data(data)
@@ -152,7 +148,7 @@ class server:
             req = self.decode_raw_data(data)
             if len(data) < 1:
                 continue
-            response,isClose = self.handle_request(client_socket, req)
+            response, isClose = self.handle_request(client_socket, req)
             self.send(client_socket, response)
             if isClose:
                 client_socket.close()
@@ -172,15 +168,15 @@ class server:
         print("send")
         client_socket.sendall(response)
 
-    def handle_first_req(self, client_socket, req:dict):
+    def handle_first_req(self, client_socket, req: dict):
 
         auth_flag, _ = self.check_auth(req)
 
         if auth_flag:
-            response,isClose = self.handle_request(client_socket, req)
+            response, isClose = self.handle_request(client_socket, req)
             self.send(client_socket, response)
             print("auth success")
-            if isClose:client_socket.close()
+            if isClose: client_socket.close()
             return
 
         response = self.authorization()
@@ -202,7 +198,7 @@ class server:
         return
 
     @staticmethod
-    def check_auth(req:dict) -> (bool, None | str):
+    def check_auth(req: dict) -> (bool, None | str):
         headers_ = req["headers"]
         headers = headers_.split(NEWLINE)
         auth_flag = False
@@ -256,7 +252,7 @@ class server:
     def handle_request(self, client_socket, req, isHead=False):
         try:
             header = req["headers"]
-            body:bytes
+            body: bytes
             body = req["body"]
             headers = header.split(NEWLINE)
             headers_dict = self.list2dict(headers)
@@ -274,11 +270,10 @@ class server:
             return
 
         if req_method == "GET" or req_method == "HEAD":
-            return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"),isClose
+            return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"), isClose
         elif req_method == "POST":
             return self.post_request(client_socket, decoded_url, headers_dict, body), isClose
         return self.method_not_allowed(), isClose
-
 
     @staticmethod
     def list2dict(list_):
@@ -299,10 +294,10 @@ class server:
             body = self.view(client_socket, decoded_url, headers, isHead)
         return body
 
-    def post_request(self, client_socket, decoded_url, headers_dict, body:bytes):
+    def post_request(self, client_socket, decoded_url, headers_dict, body: bytes):
 
         if decoded_url['target'] == "upload":
-            return self.upload(decoded_url, body,headers_dict)
+            return self.upload(decoded_url, body, headers_dict)
         elif decoded_url['target'] == "delete":
             return self.delete(decoded_url)
         else:
@@ -347,7 +342,7 @@ class server:
         ftype = MIME_TYPE["html"]
 
         q_dict = decoded_url['queries_dict']
-        if q_dict is None or q_dict.get('SUSTech-HTTP') is None or q_dict.get('SUSTech-HTTP')=='0' or isHead:
+        if q_dict is None or q_dict.get('SUSTech-HTTP') is None or q_dict.get('SUSTech-HTTP') == '0' or isHead:
             resp = Response()
             resp.set_status_line(SCHEME, 200, "OK")
             if not isHead:
@@ -357,10 +352,10 @@ class server:
                 resp.body = ""
             print("view get html")
             return resp.build()
-        if q_dict.get('SUSTech-HTTP')=='1':
+        if q_dict.get('SUSTech-HTTP') == '1':
             resp = Response()
             resp.set_status_line(SCHEME, 200, "OK")
-            resp.set_content_type("text/plain","utf-8")
+            resp.set_content_type("text/plain", "utf-8")
             resp.body = walk(local_path)
             print("view get list")
             return resp.build()
@@ -368,9 +363,6 @@ class server:
             return self.send_chunked(client_socket, html_file, ftype)
         elif headers_dict.get("Range") is not None:
             return self.send_ranged(client_socket, html_file, ftype, headers_dict["Range"])
-
-
-
 
     def send_chunked(self, client_socket, content, mime_type):
         # resp = Response()
@@ -450,11 +442,11 @@ class server:
         #     resp_ranged.set_ranged(pointer,pointer+next_range,file_size)
         return
 
-    def upload(self, decoded_url, body_:bytes,headers):
+    def upload(self, decoded_url, body_: bytes, headers):
         print(headers)
         print(1)
         print(body_)
-        body = body_ #TODO
+        body = body_  # TODO
         print(1)
         print(body)
         pattern = re.compile(r"filename=(.+)")
@@ -484,14 +476,14 @@ class server:
         print(body)
         q_dict = decoded_url["queries_dict"]
         path = q_dict["path"]
-        path = DATA_ROOT + '\\'+path
+        path = DATA_ROOT + '\\' + path
         print(path)
-        path=path.replace("\\","/")
+        path = path.replace("\\", "/")
         print(path)
         file_name = file_name[1:-2]
-        filee=path+file_name
+        filee = path + file_name
         print(filee)
-        fill=open(filee,'wb')
+        fill = open(filee, 'wb')
         fill.write(body.encode())
         fill.close
         file_size = len(body)
@@ -542,7 +534,7 @@ class server:
             response.set_keep_alive()
             response.body = None
             return response.build()
-            
+
     # def not_supported_request(self):
     #     print("request not supported")
     #     resp = Response()
@@ -550,7 +542,6 @@ class server:
     #     # resp.set_keep_alive(headers_dict.get('Connect') != "keep-alive")
     #     resp.body = open("400.html", "r").read()
     #     return resp.build()
-
 
     @staticmethod
     def authorization():
@@ -588,8 +579,8 @@ class server:
     def bad_request(self):
         resp = Response()
         resp.set_status_line(SCHEME, 400, "Bad Request")
-        resp.set_content_type(MIME_TYPE['html'],"utf-8")
-        resp.body = open('400.html',"r").read()
+        resp.set_content_type(MIME_TYPE['html'], "utf-8")
+        resp.body = open('400.html', "r").read()
         return resp.build()
 
     def method_not_allowed(self):
