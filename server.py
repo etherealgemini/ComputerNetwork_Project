@@ -118,20 +118,29 @@ class server:
     """
 
     @staticmethod
+
     def decode_raw_data(data):
-        headers_body = data.split(b'\r\n\r\n')
-        if len(headers_body) == 2:
+        # 使用正则表达式准确定位头部和主体的位置
+        headers_body_match = re.search(b'\r\n\r\n', data)
+
+        if headers_body_match:
+            # 使用 re.split 进行分割
+            headers_body = re.split(b'\r\n\r\n', data, 1)
             headers = headers_body[0]
-            body = headers_body[1]
+            body = headers_body[1] if len(headers_body) > 1 else b''
         else:
-            headers = headers_body[0]
-            body = None
+            headers = data
+            body = b''
+
         headers = headers.decode("utf-8")
+
         req = {
             "headers": headers,
-            "body": body
+            "body": body.decode("utf-8")  # 如果有主体的话，也进行 utf-8 解码
         }
+
         return req
+
 
     def handle_conn(self, client_socket: socket.socket, client_address: tuple):
         data = client_socket.recv(4096)
@@ -442,19 +451,47 @@ class server:
         return
 
     def upload(self, decoded_url, body_:bytes,headers):
+        print(headers)
+        print(1)
+        print(body_)
+        body = body_ #TODO
+        print(1)
+        print(body)
         pattern = re.compile(r"filename=(.+)")
-        match = pattern.search(headers.get('Content-Disposition'))
+        match = pattern.search(body)
         if match:
            file_name = match.group(1)
            print(file_name)
-        body = body_.decode() #TODO
+        
+        match = re.search(r'--([a-f\d]+)', body)
+        if match:
+            separator = match.group(1)
+
+            # 找到Content-Disposition头部
+            header_start = body.find("Content-Disposition")
+            header_end = body.find("\n", header_start)
+            header = body[header_start:header_end]
+
+            # 找到正文的开始和结束位置
+            content_start = body.find("\n", header_end) + 1
+            content_end = body.find(separator, content_start) - 2
+
+            # 提取正文内容
+            content = body[content_start:content_end]
+
+            body = content
+        else:
+            body = None
+        print(body)
         q_dict = decoded_url["queries_dict"]
         path = q_dict["path"]
-        path=path[:-1]
-        path = DATA_ROOT + path.replace("\\", "\\\\")
+        path = DATA_ROOT + '\\'+path
+        print(path)
         path=path.replace("\\","/")
         print(path)
-        filee=path+'/'+file_name
+        file_name = file_name[1:-2]
+        filee=path+file_name
+        print(filee)
         fill=open(filee,'wb')
         fill.write(body.encode())
         fill.close
@@ -462,46 +499,50 @@ class server:
         response = Response()
         response.set_status_line(SCHEME, 200, "OK")
         response.set_content_type("text/plain", "")
-        response.set_content_length(file_size)
+        response.set_content_length(0)
         response.set_keep_alive()
         response.body = None
+
         return response.build()
 
     def delete(self, decoded_url):
-            q_dict = decoded_url["queries_dict"]
-            path = q_dict.get("path")
+        q_dict = decoded_url["queries_dict"]
+        path = q_dict.get("path")
+        print(2)
+        print(path)
 
-            if path:
-                path = DATA_ROOT + path.replace("\\", "/")
-                print(path)
+        if path:
+            path = DATA_ROOT + "\\" + path.replace("/", "\\")
+            print(2)
+            print(path)
 
-                if os.path.exists(path):
-                    os.remove(path)
-                    response = Response()
-                    response.set_status_line(SCHEME, 200, "OK")
-                    response.set_content_type("text/plain", "")
-                    response.set_content_length(0)  # Assuming no content in the response body for a successful delete
-                    response.set_keep_alive()
-                    response.body = None
-                    return response.build()
-                else:
-                    # File not found
-                    response = Response()
-                    response.set_status_line(SCHEME, 404, "Not Found")
-                    response.set_content_type("text/plain", "")
-                    response.set_content_length(0)
-                    response.set_keep_alive()
-                    response.body = None
-                    return response.build()
-            else:
-                # Invalid request, missing 'path' parameter
+            if os.path.exists(path):
+                os.remove(path)
                 response = Response()
-                response.set_status_line(SCHEME, 400, "Bad Request")
+                response.set_status_line(SCHEME, 200, "OK")
+                response.set_content_type("text/plain", "")
+                response.set_content_length(0)  # Assuming no content in the response body for a successful delete
+                response.set_keep_alive()
+                response.body = None
+                return response.build()
+            else:
+                # File not found
+                response = Response()
+                response.set_status_line(SCHEME, 404, "Not Found")
                 response.set_content_type("text/plain", "")
                 response.set_content_length(0)
                 response.set_keep_alive()
                 response.body = None
                 return response.build()
+        else:
+            # Invalid request, missing 'path' parameter
+            response = Response()
+            response.set_status_line(SCHEME, 400, "Bad Request")
+            response.set_content_type("text/plain", "")
+            response.set_content_length(0)
+            response.set_keep_alive()
+            response.body = None
+            return response.build()
             
     # def not_supported_request(self):
     #     print("request not supported")
