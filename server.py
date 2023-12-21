@@ -1,3 +1,4 @@
+from ast import walk
 import base64
 import chunk
 import copy
@@ -13,6 +14,7 @@ from util import *
 import numpy as np
 
 # 运行后，将在路径D:\\temp\pythonServer创建根目录文件夹，浏览器中运行http:\\localhost:8000\查看
+os.environ['PYTHONUTF8'] = '1'
 
 NEWLINE = "\r\n"
 FILE_ROOT = os.getcwd()
@@ -466,9 +468,41 @@ class server:
         return response.build()
 
     def delete(self, decoded_url):
-        print(f"delete file at \"{decoded_url['params']}\"")
-        pass
+            q_dict = decoded_url["queries_dict"]
+            path = q_dict.get("path")
 
+            if path:
+                path = DATA_ROOT + path.replace("\\", "/")
+                print(path)
+
+                if os.path.exists(path):
+                    os.remove(path)
+                    response = Response()
+                    response.set_status_line(SCHEME, 200, "OK")
+                    response.set_content_type("text/plain", "")
+                    response.set_content_length(0)  # Assuming no content in the response body for a successful delete
+                    response.set_keep_alive()
+                    response.body = None
+                    return response.build()
+                else:
+                    # File not found
+                    response = Response()
+                    response.set_status_line(SCHEME, 404, "Not Found")
+                    response.set_content_type("text/plain", "")
+                    response.set_content_length(0)
+                    response.set_keep_alive()
+                    response.body = None
+                    return response.build()
+            else:
+                # Invalid request, missing 'path' parameter
+                response = Response()
+                response.set_status_line(SCHEME, 400, "Bad Request")
+                response.set_content_type("text/plain", "")
+                response.set_content_length(0)
+                response.set_keep_alive()
+                response.body = None
+                return response.build()
+            
     # def not_supported_request(self):
     #     print("request not supported")
     #     resp = Response()
