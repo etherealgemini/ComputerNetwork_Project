@@ -1,15 +1,17 @@
+from ast import walk
 import base64
+import chunk
+import copy
 import logging
 import mimetypes
+import mimetypes as mime
+import os
+from pathlib import Path
 import re
 import socket
 import threading
-from ast import walk
-from pathlib import Path
-
-import numpy as np
-
 from util import *
+import numpy as np
 
 # 运行后，将在路径D:\\temp\pythonServer创建根目录文件夹，浏览器中运行http:\\localhost:8000\查看
 os.environ['PYTHONUTF8'] = '1'
@@ -30,6 +32,7 @@ user_dict = {
     "client3": "123"
 }
 session_dict = dict()
+session_usr_dict = dict()
 rng = np.random.default_rng()
 
 
@@ -93,7 +96,7 @@ class server:
         self.root = path
         if not path.exists():
             path.mkdir()
-
+        self.session_dict_init()
         server_socket.bind(("localhost", 8080))
 
         server_socket.listen()
@@ -158,23 +161,37 @@ class server:
             # break
 
     @staticmethod
-    def send(client_socket: socket.socket, response):
+    def send(client_socket: socket.socket, response, username=None):
         if response is None:
             logging.exception(f"trying to send an empty response to: {client_socket}")
             return
+
+        if type(response).__name__ == "Response":
+            response: Response
+            if response.body is None:
+                response.body = ""
+            if username != None:
+                response.set_session(username)
+            bd_name = type(response.body).__name__
+            if bd_name == "str":
+                response = response.build()
+            elif bd_name == "bytes":
+                response = response.build_byte()
+
         if type(response).__name__ == "str":
             print(1)
             response = response.encode('utf-8')
+
         print("send")
         client_socket.sendall(response)
 
     def handle_first_req(self, client_socket, req: dict):
 
-        auth_flag, _ = self.check_auth(req)
+        auth_flag, username = self.check_auth(req)
 
         if auth_flag:
             response, isClose = self.handle_request(client_socket, req)
-            self.send(client_socket, response)
+            self.send(client_socket, response, username)
             print("auth success")
             if isClose: client_socket.close()
             return
@@ -192,7 +209,7 @@ class server:
             client_socket.close()
 
         response, isClose = self.handle_request(client_socket, req)
-        self.send(client_socket, response)
+        self.send(client_socket, response, username)
         print("auth success")
         if isClose: client_socket.close()
         return
@@ -227,12 +244,17 @@ class server:
                 for cookie in cookies:
                     cookie: str
                     cookie = cookie.strip()
-                    session_name, session_id = cookie.split("=") if "=" in cookie else None, None
+                    name_id, _ = cookie.split("=") if "=" in cookie else None, None
+                    session_name, session_id = name_id
+                    if session_name == "session-id" and session_id in session_usr_dict.keys():
+                        auth_flag = True
+                        usr_name = session_usr_dict[session_id]
+                        break
                     if session_name is None or session_id is None:
                         continue
-                    if session_dict[session_name] != session_id:
-                        continue
-                    else:
+                    # if session_dict[session_name] != session_id:
+                    #     continue
+                    elif session_dict[session_name] == session_id:
                         usr_name = session_name
                         auth_flag = True
                 break
@@ -328,8 +350,8 @@ class server:
         resp.set_content_type(mime_type, "")
         resp.set_keep_alive()
         resp.body = content
-        out = resp.build_byte()
-        return out
+        # out = resp.build_byte()
+        return resp
 
     def view(self, client_socket, decoded_url, headers_dict, isHead):
         # if decoded_url['target'].endswith("."):
@@ -351,18 +373,20 @@ class server:
             else:
                 resp.body = ""
             print("view get html")
-            return resp.build()
+            return resp
         if q_dict.get('SUSTech-HTTP') == '1':
             resp = Response()
             resp.set_status_line(SCHEME, 200, "OK")
             resp.set_content_type("text/plain", "utf-8")
             resp.body = walk(local_path)
             print("view get list")
-            return resp.build()
+            return resp
         if q_dict.get("chunk") is not None and q_dict["chunked"] == 1:
             return self.send_chunked(client_socket, html_file, ftype)
         elif headers_dict.get("Range") is not None:
-            return self.send_ranged(client_socket, html_file, ftype, headers_dict["Range"])
+            range__ = headers_dict["Range"]
+            range_ = range__.split(",") if "," in range__ else range__.strip()
+            return self.send_ranged(client_socket, html_file, ftype, range_)
 
     def send_chunked(self, client_socket, content, mime_type):
         # resp = Response()
@@ -417,11 +441,27 @@ class server:
         # range_tuple = list(tuple)
         if len(range_) > 1:
             mime_type = "multipart/byteranges"
+            for r in range_:
+                s, t = r.split("-")
+                resp_ranged.set_ranged(s, t, file_size)
+                if s is None:
+                    s_, t_ = file_size - t + 1, file_size
+                elif t is None:
+                    s_, t_ = s, file_size
+                else:
+                    s_, t_ = s, t
+                resp_ranged.set_content_length(t_ - s_ + 1)
+                resp_ranged.set_content_type(mime_type, "")
+                if s_ < 0 or t_ > file_size:
+                    resp_ranged.set_range_not_satisfiable()
+                else:
+                    resp_ranged.body = content[s_:t_]
+
+                client_socket.sendall(resp_ranged.build_byte())
+
         else:
             mime_type = mime_type_
-
-        for r in range_:
-            s, t = r.split("-")
+            s, t = range_.split("-")
             resp_ranged.set_ranged(s, t, file_size)
             if s is None:
                 s_, t_ = file_size - t + 1, file_size
@@ -438,6 +478,10 @@ class server:
 
             client_socket.sendall(resp_ranged.build_byte())
 
+        #     single part
+
+
+
         # while True:
         #     resp_ranged.set_ranged(pointer,pointer+next_range,file_size)
         return
@@ -452,8 +496,9 @@ class server:
         pattern = re.compile(r"filename=(.+)")
         match = pattern.search(body)
         if match:
-           file_name = match.group(1)
-           print(file_name)
+            file_name = match.group(1)
+            print(file_name)
+
         match = re.search(r'--([a-f\d]+)', body)
         if match:
             separator = match.group(1)
@@ -494,7 +539,7 @@ class server:
         response.set_keep_alive()
         response.body = None
 
-        return response.build()
+        return response
 
     def delete(self, decoded_url):
         q_dict = decoded_url["queries_dict"]
@@ -515,7 +560,7 @@ class server:
                 response.set_content_length(0)  # Assuming no content in the response body for a successful delete
                 response.set_keep_alive()
                 response.body = None
-                return response.build()
+                return response
             else:
                 # File not found
                 response = Response()
@@ -524,7 +569,7 @@ class server:
                 response.set_content_length(0)
                 response.set_keep_alive()
                 response.body = None
-                return response.build()
+                return response
         else:
             # Invalid request, missing 'path' parameter
             response = Response()
@@ -533,7 +578,7 @@ class server:
             response.set_content_length(0)
             response.set_keep_alive()
             response.body = None
-            return response.build()
+            return response
 
     # def not_supported_request(self):
     #     print("request not supported")
@@ -590,6 +635,11 @@ class server:
         resp.body = open('405.html', "r").read()
         return resp.build()
 
+    def session_dict_init(self):
+        for usr in user_dict.keys():
+            session_usr_dict[str(hash(usr) + hash(user_dict[usr]))] = usr
+        return
+
 
 class Response:
     def __init__(self):
@@ -635,6 +685,10 @@ class Response:
 
     def set_cookie(self, usr, param):
         self.headers["Set-Cookie"] = str(usr) + "=" + str(param) + "; path=/"
+        return
+
+    def set_session(self, usr):
+        self.headers["Set-Cookie"] = "session-id=" + str(hash(usr) + hash(user_dict[usr])) + "; path=/"
         return
 
     def remove_header(self, header: str):
