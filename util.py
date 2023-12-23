@@ -51,3 +51,13 @@ def generate_view_html(local_root, root,port):
     # print(template)
 
     return template
+
+def walk(path):
+    list_ = list()
+    for _,dirs,files in os.walk(path):
+        for dir in dirs:
+            list_.append(dir)
+        for file in files:
+            list_.append(file)
+        break
+    return str(list_)
