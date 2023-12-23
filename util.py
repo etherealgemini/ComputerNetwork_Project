@@ -1,9 +1,10 @@
+# -*- coding: UTF-8 -*-
 import os
 import time
 
 
 def generate_view_html(local_root, root,port):
-    template_file = open("template.html", 'r')
+    template_file = open("template.html", 'r',encoding='utf-8')
     print(root)
     template = template_file.read()
     template += "\r\n"
