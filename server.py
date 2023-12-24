@@ -139,6 +139,7 @@ class server:
             "body": body.decode("utf-8")  # 如果有主体的话，也进行 utf-8 解码
         }
 
+
         return req
 
     def handle_conn(self, client_socket: socket.socket, client_address: tuple):
@@ -202,6 +203,7 @@ class server:
         data = client_socket.recv(4096)
         req = self.decode_raw_data(data)
         auth_flag, username = self.check_auth(req)
+        
 
         if not auth_flag:
             self.send(client_socket, self.unAuthorized())
@@ -229,6 +231,7 @@ class server:
                 auth_method, code = temp[0], temp[len(temp) - 1]
                 temp = base64.b64decode(code).decode("utf-8").split(":")
                 print(temp)
+
                 if len(temp) < 2:
                     break
                 usr_name, pw = temp[0], temp[1]
@@ -294,7 +297,30 @@ class server:
         if req_method == "GET" or req_method == "HEAD":
             return self.get_request(client_socket, decoded_url, headers_dict, isHead=req_method == "HEAD"), isClose
         elif req_method == "POST":
-            return self.post_request(client_socket, decoded_url, headers_dict, body), isClose
+            headers_ = req["headers"]
+            headers = headers_.split(NEWLINE)
+            limit = False
+            for header in headers:
+                if header.__contains__("Authorization"):
+                    _, r = header.split(":")
+                    temp = r.split(" ")
+                    if len(temp) < 2:
+                        break
+                    auth_method, code = temp[0], temp[len(temp) - 1]
+                    temp = base64.b64decode(code).decode("utf-8").split(":")
+                    #print(temp)
+                    #print(temp[0])
+                    q_dict = decoded_url["queries_dict"]
+                    path = q_dict.get("path")
+                    #print(path)
+                    if (path != None):
+                        path = path.split("/")[0]
+                        #print(2)
+                        #print(path)
+                        if (temp[0] != path):
+                            limit = True
+
+            return self.post_request(client_socket, decoded_url, headers_dict, body, limit), isClose
         return self.method_not_allowed(), isClose
 
     @staticmethod
@@ -316,8 +342,15 @@ class server:
             body = self.view(client_socket, decoded_url, headers, isHead)
         return body
 
-    def post_request(self, client_socket, decoded_url, headers_dict, body: bytes):
-
+    def post_request(self, client_socket, decoded_url, headers_dict, body: bytes,limit):
+        if limit:
+            response = Response()
+            response.set_status_line(SCHEME, 403, "Forbidden")
+            response.set_content_type("text/plain", "")
+            response.set_content_length(0)
+            response.set_keep_alive()
+            response.body = None
+            return response
         if decoded_url['target'] == "upload":
             return self.upload(decoded_url, body, headers_dict)
         elif decoded_url['target'] == "delete":
