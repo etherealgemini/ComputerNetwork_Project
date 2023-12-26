@@ -1,17 +1,17 @@
-from ast import walk
 import base64
-import chunk
-import copy
 import logging
 import mimetypes
-import mimetypes as mime
-import os
-from pathlib import Path
 import re
 import socket
 import threading
-from util import *
+from ast import walk
+from pathlib import Path
+from hashlib import sha256
+from re import Pattern
+
 import numpy as np
+
+from util import *
 
 # 运行后，将在路径D:\\temp\pythonServer创建根目录文件夹，浏览器中运行http:\\localhost:8000\查看
 os.environ['PYTHONUTF8'] = '1'
@@ -133,10 +133,14 @@ class server:
             body = b''
 
         headers = headers.decode("utf-8")
+        try:
+            body_ = body.decode("utf-8")
+        except UnicodeDecodeError:
+            body_ = body
 
         req = {
             "headers": headers,
-            "body": body.decode("utf-8")  # 如果有主体的话，也进行 utf-8 解码
+            "body": body_  # 如果有主体的话，也进行 utf-8 解码
         }
 
 
@@ -370,10 +374,16 @@ class server:
         except FileNotFoundError:
             return self.bad_request()
         q_dict = decoded_url["queries_dict"]
-        if q_dict is None or q_dict.get("chunk") is None or q_dict["chunked"] != 1:
+        if q_dict is None:
             return self.download_regular(content, ftype, isHead)
-        else:
+        elif headers_dict.get("Range") is not None:
+            range__ = headers_dict["Range"]
+            range_ = range__.split(",") if "," in range__ else range__.strip()
+            return self.send_ranged(client_socket, content, ftype, range_)
+        elif q_dict.get("chunk") is not None and q_dict["chunked"] == 1:
             return self.send_chunked(client_socket, content, ftype)
+        else:
+            return self.download_regular(content, ftype, isHead)
 
     @staticmethod
     def download_regular(content, mime_type, isHead) -> bytes:
@@ -466,7 +476,7 @@ class server:
         resp_ranged.set_keep_alive()
         resp_ranged.set_accept_ranges()
         resp_ranged.set_status_line(SCHEME, 206, "Partial Content")
-        if type(content).__name__() == "str":
+        if type(content).__name__ == "str":
             content = content.encode()
         # pointer = 0
         # rest_len = len(content)
@@ -474,23 +484,44 @@ class server:
         # range_tuple = list(tuple)
         if len(range_) > 1:
             mime_type = "multipart/byteranges"
-            for r in range_:
+            boundary = sha256(content + b'sustech').hexdigest()[:13]
+            print(boundary)
+            resp_ranged.set_content_type("", "", boundary)
+            boundary = boundary.encode()
+
+            resp_ranged.body = b''
+            for idx in range(len(range_)):
+                resp_ranged.body += b'--' + boundary
+                resp_ranged.body += NEWLINE.encode()
+
+                r = range_[idx]
                 s, t = r.split("-")
-                resp_ranged.set_ranged(s, t, file_size)
+                s = int(s)
+                t = int(t)
+                resp_ranged.body_build_ranged(s, t, file_size,isByte=True)
+                resp_ranged.body += NEWLINE.encode()
+                resp_ranged.body_build_content_type(mime_type_, isByte=True)
+                resp_ranged.body += NEWLINE.encode()
+                resp_ranged.body += NEWLINE.encode()
+
                 if s is None:
                     s_, t_ = file_size - t + 1, file_size
                 elif t is None:
                     s_, t_ = s, file_size
                 else:
                     s_, t_ = s, t
-                resp_ranged.set_content_length(t_ - s_ + 1)
-                resp_ranged.set_content_type(mime_type, "")
+
+                # resp_ranged.body_build_content_length(t_ - s_ + 1,isByte=True)
                 if s_ < 0 or t_ > file_size:
                     resp_ranged.set_range_not_satisfiable()
                 else:
-                    resp_ranged.body = content[s_:t_]
+                    resp_ranged.body += content[s_:t_]
+                    resp_ranged.body += NEWLINE.encode()
+                    if idx == len(range_) - 1:
+                        resp_ranged.body += b'--' + boundary + b'--'
 
-                client_socket.sendall(resp_ranged.build_byte())
+
+            client_socket.sendall(resp_ranged.build_byte())
 
         else:
             mime_type = mime_type_
@@ -526,23 +557,33 @@ class server:
         body = body_  # TODO
         print(1)
         print(body)
-        pattern = re.compile(r"filename=(.+)")
-        match = pattern.search(body)
+        body_type = type(body).__name__
+        if body_type=="str":
+            pat_file_name = re.compile(r"filename=(.+)")
+            pat_boundary = re.compile(r'--([a-f\d]+)')
+            pat_content_disp = "Content-Disposition"
+            pat_enter = "\n"
+        elif body_type=="bytes":
+            pat_file_name = re.compile(rb"filename=(.+)")
+            pat_boundary = re.compile(rb'--([a-f\d]+)')
+            pat_content_disp = b"Content-Disposition"
+            pat_enter = b"\n"
+        match = pat_file_name.search(body)
         if match:
             file_name = match.group(1)
             print(file_name)
 
-        match = re.search(r'--([a-f\d]+)', body)
+        match = re.search(pat_boundary, body)
         if match:
             separator = match.group(1)
 
             # 找到Content-Disposition头部
-            header_start = body.find("Content-Disposition")
-            header_end = body.find("\n", header_start)
+            header_start = body.find(pat_content_disp)
+            header_end = body.find(pat_enter, header_start)
             header = body[header_start:header_end]
 
             # 找到正文的开始和结束位置
-            content_start = body.find("\n", header_end) + 1
+            content_start = body.find(pat_enter, header_end) + 1
             content_end = body.find(separator, content_start) - 2
 
             # 提取正文内容
@@ -559,11 +600,16 @@ class server:
         path = path.replace("\\", "/")
         print(path)
         file_name = file_name[1:-2]
+        file_name = file_name if body_type == "str" else file_name.decode()
         filee = path + file_name
         print(filee)
+        if not os.path.exists(path):
+            os.makedirs(path)
         fill = open(filee, 'wb')
-        fill.write(body.encode())
-        fill.close
+        if body_type == "str":
+            body = body.encode()
+        fill.write(body)
+        fill.close()
         file_size = len(body)
         response = Response()
         response.set_status_line(SCHEME, 200, "OK")
@@ -687,10 +733,21 @@ class Response:
     def add_header(self, header: str, value):
         self.headers[header] = value
 
-    def set_content_type(self, type: str, charset: str):
-        self.headers["Content-Type"] = type
+    def set_content_type(self, type_: str, charset: str, boundary=None):
+        ct = type_
+        if boundary is not None:
+            ct += f"multipart/byteranges; boundary={boundary}"
+            self.headers["Content-Type"] = ct
+            return
         if charset != "":
-            self.headers["Content-Type"] += "; charset=" + charset
+            ct += "; charset=" + charset
+        self.headers["Content-Type"] = ct
+
+    def body_build_content_type(self, type_, isByte=False):
+        ct = f"Content-Type:{str(type_)}"
+        if isByte:
+            ct = ct.encode()
+        self.body += ct
 
     def set_keep_alive(self, alive=True):
         if alive:
@@ -707,11 +764,23 @@ class Response:
     def set_content_length(self, length):
         self.headers["Content-Length"] = str(length)
 
+    def body_build_content_length(self, length, isByte=False):
+        cl = f"Content-Length:{str(length)}"
+        if isByte:
+            cl.encode()
+        self.body += cl
+
     def set_chunked(self):
         self.headers["Transfer-Encoding"] = "chunked"
 
     def set_ranged(self, start, end, maximum):
         self.headers["Content-Range"] = f"bytes {str(start)}-{str(end)}/{str(maximum)}"
+
+    def body_build_ranged(self, start, end, maximum, isByte=False):
+        rg = f"Content-Range: bytes {str(start)}-{str(end)}/{str(maximum)}"
+        if isByte:
+            rg = rg.encode()
+        self.body += rg
 
     def set_range_not_satisfiable(self):
         self.set_status_line(SCHEME, 416, "Range Not Satisfiable")
