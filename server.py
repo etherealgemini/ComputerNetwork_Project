@@ -1,5 +1,6 @@
 import base64
 import logging
+import sys
 import mimetypes
 import re
 import socket
@@ -34,6 +35,9 @@ user_dict = {
 session_dict = dict()
 session_usr_dict = dict()
 rng = np.random.default_rng()
+
+host = sys.argv[2] 
+port = int(sys.argv[4])
 
 
 def url_decoder(url: str) -> dict[str]:
@@ -97,7 +101,9 @@ class server:
         if not path.exists():
             path.mkdir()
         self.session_dict_init()
-        server_socket.bind(("localhost", 8080))
+        print(host)
+        print(port)
+        server_socket.bind((host,8080))
 
         server_socket.listen()
         self.launch()
