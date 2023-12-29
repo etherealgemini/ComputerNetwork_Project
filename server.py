@@ -293,6 +293,7 @@ class server:
 
     def handle_request(self, client_socket, req, isHead=False):
         try:
+            print(req.__str__())
             header = req["headers"]
             body: bytes
             body = req["body"]
@@ -303,9 +304,10 @@ class server:
             url = request_line[1]
 
             decoded_url = url_decoder(url)
-            isClose = headers_dict.get("Connection", "keep-alive") == "close"
+            isClose = True if headers_dict.get("Connection", "keep-alive") == "close" else False
 
         except IndexError:
+            isClose = True if headers_dict.get("Connection", "keep-alive") == "close" else False
             a = 1
 
         if len(request_line) == 0:
@@ -368,9 +370,9 @@ class server:
             response.set_keep_alive()
             response.body = None
             return response
-        if decoded_url['target'] == "upload":
+        if decoded_url['target'] == 'upload':
             return self.upload(decoded_url, body, headers_dict)
-        elif decoded_url['target'] == "delete":
+        elif decoded_url['target'] == 'delete':
             return self.delete(decoded_url)
         else:
             return self.method_not_allowed()

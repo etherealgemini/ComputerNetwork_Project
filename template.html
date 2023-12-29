@@ -12,6 +12,7 @@
 <meta name="google" value="notranslate">
 
 <script>
+
   function view(url) {
     console.log("view: "+url);
     window.location.replace(url)
@@ -81,7 +82,7 @@ function addRow(name, url, isdir,
       //   }
       // })
 
-      console.log("download: "+url)
+      console.log("download: "+root+url)
       // download(url,"test")
       var oReq = new XMLHttpRequest();
       oReq.open("GET", root+url, true);
@@ -156,6 +157,23 @@ function onHasParentDirectory() {
   link.href="javascript:void(0);"
   link.onclick=function(){view(root + "\.\.")};
 
+}
+
+function upload() {
+  let file = document.getElementById("text_file").files[0];
+  let formData = new FormData();
+  formData.append("file", file);
+
+  let xhr = new XMLHttpRequest();
+  console.log(document.location.host+"/upload?path="+document.location.pathname)
+  xhr.open("POST", document.location.protocol+document.location.host+"/upload?path="+document.location.pathname);
+  xhr.send(formData);
+
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState === 4 && xhr.status === 200) {
+      console.log("文件上传成功！");
+    }
+  }
 }
 
 function sortTable(column) {
@@ -299,6 +317,16 @@ window.addEventListener('DOMContentLoaded', onLoad);
   <tbody id="tbody">
   </tbody>
 </table>
+
+<form method="post" enctype="multipart/form-data">
+  <div>
+    <label for="text_file">选择要上传的文件</label>
+    <input type="file" id="text_file" name="file" multiple accept="text/*"/>
+  </div>
+  <div>
+    <button onclick="upload()">提交</button>
+  </div>
+</form>
 
 </body>
 
