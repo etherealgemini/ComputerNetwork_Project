@@ -5,6 +5,7 @@ import mimetypes
 import re
 import socket
 import threading
+import argparse
 from ast import walk
 from pathlib import Path
 from hashlib import sha256
@@ -36,9 +37,15 @@ session_dict = dict()
 session_usr_dict = dict()
 rng = np.random.default_rng()
 
-host = sys.argv[2] 
-port = int(sys.argv[4])
+host = "localhost"
+port = 8080
 
+parser_ = argparse.ArgumentParser(description="Server config")
+
+parser_.add_argument('-i',nargs='?',type=str,help='hostname of server',default='localhost',const='localhost')
+parser_.add_argument('-p',nargs='?',type=int,help='port of server',default=8080,const=8080)
+
+args = parser_.parse_args()
 
 def url_decoder(url: str) -> dict[str]:
     """
@@ -845,4 +852,6 @@ class Response:
 
 
 if __name__ == "__main__":
+    host = args.i
+    port = args.p
     server()
