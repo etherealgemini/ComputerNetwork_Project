@@ -274,7 +274,7 @@ class server:
                         continue
                     # if session_dict[session_name] != session_id:
                     #     continue
-                    elif session_dict[session_name] == session_id:
+                    elif session_name in session_dict.keys() and session_dict[session_name] == session_id:
                         usr_name = session_name
                         auth_flag = True
                 break
