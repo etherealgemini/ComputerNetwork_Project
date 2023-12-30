@@ -1,4 +1,5 @@
 import base64
+import datetime
 import logging
 import sys
 import mimetypes
@@ -6,6 +7,7 @@ import re
 import socket
 import threading
 import argparse
+from apscheduler.schedulers.background import BackgroundScheduler
 from ast import walk
 from pathlib import Path
 from hashlib import sha256
@@ -27,14 +29,15 @@ MIME_TYPE = {
     "html": "text/html"
 }
 CHUNK_SIZE = 1024
+SESSION_EXPIRE_TIME_SEC = 3000
 user_dict = {
     "test": "123456",
     "client1": "123",
     "client2": "123",
     "client3": "123"
 }
-session_dict = dict()
-session_usr_dict = dict()
+
+session_id_dict = dict()
 rng = np.random.default_rng()
 
 host = "localhost"
@@ -42,10 +45,11 @@ port = 8080
 
 parser_ = argparse.ArgumentParser(description="Server config")
 
-parser_.add_argument('-i',nargs='?',type=str,help='hostname of server',default='localhost',const='localhost')
-parser_.add_argument('-p',nargs='?',type=int,help='port of server',default=8080,const=8080)
+parser_.add_argument('-i', nargs='?', type=str, help='hostname of server', default='localhost', const='localhost')
+parser_.add_argument('-p', nargs='?', type=int, help='port of server', default=8080, const=8080)
 
 args = parser_.parse_args()
+
 
 def url_decoder(url: str) -> dict[str]:
     """
@@ -101,16 +105,20 @@ def url_decoder(url: str) -> dict[str]:
 
 class server:
     def __init__(self):
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(clear_expire_session_job, 'interval', seconds=10)
+        scheduler.start()
+
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket = server_socket
         path = Path(DATA_ROOT)
         self.root = path
         if not path.exists():
             path.mkdir()
-        self.session_dict_init()
+        # self.session_dict_init()
         print(host)
         print(port)
-        server_socket.bind((host,8080))
+        server_socket.bind((host, 8080))
 
         server_socket.listen()
         self.launch()
@@ -134,28 +142,40 @@ class server:
     @staticmethod
     def decode_raw_data(data):
         # 使用正则表达式准确定位头部和主体的位置
-        headers_body_match = re.search(b'\r\n\r\n', data)
+        if isinstance(data, str):
+            headers_body_match = re.search('\r\n\r\n', data)
 
-        if headers_body_match:
-            # 使用 re.split 进行分割
-            headers_body = re.split(b'\r\n\r\n', data, 1)
-            headers = headers_body[0]
-            body = headers_body[1] if len(headers_body) > 1 else b''
-        else:
-            headers = data
-            body = b''
-
-        headers = headers.decode("utf-8")
-        try:
-            body_ = body.decode("utf-8")
-        except UnicodeDecodeError:
+            if headers_body_match:
+                # 使用 re.split 进行分割
+                headers_body = re.split('\r\n\r\n', data, 1)
+                headers = headers_body[0]
+                body = headers_body[1] if len(headers_body) > 1 else ''
+            else:
+                headers = data
+                body = ''
             body_ = body
+        else:
+            headers_body_match = re.search(b'\r\n\r\n', data)
+
+            if headers_body_match:
+                # 使用 re.split 进行分割
+                headers_body = re.split(b'\r\n\r\n', data, 1)
+                headers = headers_body[0]
+                body = headers_body[1] if len(headers_body) > 1 else b''
+            else:
+                headers = data
+                body = b''
+
+            headers = headers.decode("utf-8")
+            try:
+                body_ = body.decode("utf-8")
+            except UnicodeDecodeError:
+                body_ = body
 
         req = {
             "headers": headers,
             "body": body_  # 如果有主体的话，也进行 utf-8 解码
         }
-
 
         return req
 
@@ -184,11 +204,11 @@ class server:
             logging.exception(f"trying to send an empty response to: {client_socket}")
             return
 
-        if type(response).__name__ == "Response":
+        if isinstance(response, Response):
             response: Response
             if response.body is None:
                 response.body = ""
-            if username != None:
+            if username is not None:
                 response.set_session(username)
             bd_name = type(response.body).__name__
             if bd_name == "str":
@@ -196,7 +216,7 @@ class server:
             elif bd_name == "bytes":
                 response = response.build_byte()
 
-        if type(response).__name__ == "str":
+        if isinstance(response, str):
             print(1)
             response = response.encode('utf-8')
 
@@ -220,7 +240,6 @@ class server:
         data = client_socket.recv(4096)
         req = self.decode_raw_data(data)
         auth_flag, username = self.check_auth(req)
-        
 
         if not auth_flag:
             self.send(client_socket, self.unAuthorized())
@@ -252,7 +271,7 @@ class server:
                 if len(temp) < 2:
                     break
                 usr_name, pw = temp[0], temp[1]
-                if user_dict[usr_name] != pw:
+                if usr_name not in user_dict.keys() or user_dict[usr_name] != pw:
                     break
                 auth_flag = True
                 break
@@ -266,17 +285,17 @@ class server:
                     cookie = cookie.strip()
                     name_id, _ = cookie.split("=") if "=" in cookie else None, None
                     session_name, session_id = name_id
-                    if session_name == "session-id" and session_id in session_usr_dict.keys():
+                    if session_name == "session-id" and session_id in session_id_dict.keys():
                         auth_flag = True
-                        usr_name = session_usr_dict[session_id]
+                        usr_name = session_id_dict[session_id][0]
                         break
                     if session_name is None or session_id is None:
                         continue
                     # if session_dict[session_name] != session_id:
                     #     continue
-                    elif session_name in session_dict.keys() and session_dict[session_name] == session_id:
-                        usr_name = session_name
-                        auth_flag = True
+                    # elif session_name in session_dict.keys() and session_dict[session_name] == session_id:
+                    #     usr_name = session_name
+                    #     auth_flag = True
                 break
 
         return auth_flag, usr_name
@@ -327,15 +346,16 @@ class server:
                         break
                     auth_method, code = temp[0], temp[len(temp) - 1]
                     temp = base64.b64decode(code).decode("utf-8").split(":")
-                    #print(temp)
-                    #print(temp[0])
+                    # print(temp)
+                    # print(temp[0])
                     q_dict = decoded_url["queries_dict"]
                     path = q_dict.get("path")
-                    #print(path)
+                    # print(path)
                     if (path != None):
-                        path = path.split("/")[0]
-                        #print(2)
-                        #print(path)
+                        path = "/" + path if path[0] != "/" else path
+                        path = path.split("/")[1]
+                        # print(2)
+                        print(path)
                         if (temp[0] != path):
                             limit = True
 
@@ -361,7 +381,7 @@ class server:
             body = self.view(client_socket, decoded_url, headers, isHead)
         return body
 
-    def post_request(self, client_socket, decoded_url, headers_dict, body: bytes,limit):
+    def post_request(self, client_socket, decoded_url, headers_dict, body: bytes, limit):
         if limit:
             response = Response()
             response.set_status_line(SCHEME, 403, "Forbidden")
@@ -371,7 +391,7 @@ class server:
             response.body = None
             return response
         if decoded_url['target'] == 'upload':
-            return self.upload(decoded_url, body, headers_dict)
+            return self.upload(client_socket, decoded_url, body, headers_dict)
         elif decoded_url['target'] == 'delete':
             return self.delete(decoded_url)
         else:
@@ -455,7 +475,7 @@ class server:
         # resp.body = None
 
         resp_chunk = Response()
-        if type(content).__name__() == "str":
+        if isinstance(content, str):
             content = content.encode()
         pointer = 0
         rest_len = len(content)
@@ -491,7 +511,7 @@ class server:
         resp_ranged.set_keep_alive()
         resp_ranged.set_accept_ranges()
         resp_ranged.set_status_line(SCHEME, 206, "Partial Content")
-        if type(content).__name__ == "str":
+        if isinstance(content, str):
             content = content.encode()
         # pointer = 0
         # rest_len = len(content)
@@ -513,7 +533,7 @@ class server:
                 s, t = r.split("-")
                 s = int(s)
                 t = int(t)
-                resp_ranged.body_build_ranged(s, t, file_size,isByte=True)
+                resp_ranged.body_build_ranged(s, t, file_size, isByte=True)
                 resp_ranged.body += NEWLINE.encode()
                 resp_ranged.body_build_content_type(mime_type_, isByte=True)
                 resp_ranged.body += NEWLINE.encode()
@@ -534,7 +554,6 @@ class server:
                     resp_ranged.body += NEWLINE.encode()
                     if idx == len(range_) - 1:
                         resp_ranged.body += b'--' + boundary + b'--'
-
 
             client_socket.sendall(resp_ranged.build_byte())
 
@@ -559,81 +578,142 @@ class server:
 
         #     single part
 
-
-
         # while True:
         #     resp_ranged.set_ranged(pointer,pointer+next_range,file_size)
         return
 
-    def upload(self, decoded_url, body_: bytes, headers):
+    def upload(self, client_socket: socket.socket, decoded_url, body_: bytes, headers):
         print(headers)
         print(1)
         print(body_)
-        body = body_  # TODO
-        print(1)
-        print(body)
-        body_type = type(body).__name__
-        if body_type=="str":
-            pat_file_name = re.compile(r"filename=(.+)")
-            pat_boundary = re.compile(r'--([a-f\d]+)')
-            pat_content_disp = "Content-Disposition"
-            pat_enter = "\n"
-        elif body_type=="bytes":
-            pat_file_name = re.compile(rb"filename=(.+)")
-            pat_boundary = re.compile(rb'--([a-f\d]+)')
-            pat_content_disp = b"Content-Disposition"
-            pat_enter = b"\n"
-        match = pat_file_name.search(body)
-        if match:
-            file_name = match.group(1)
-            print(file_name)
 
-        match = re.search(pat_boundary, body)
-        if match:
-            separator = match.group(1)
+        content_type_header = headers.get("Content-Type")
+        content_type = content_type_header.split(";") if "=" in content_type_header else content_type_header, None
+        boundary = None
+        for ct in content_type[0]:
+            if "boundary" in ct:
+                boundary_ = ct.split("=")
+                boundary = boundary_[1]
+        # boundary_:str
+        boundary = "--" + boundary if boundary is not None else None
 
-            # 找到Content-Disposition头部
-            header_start = body.find(pat_content_disp)
-            header_end = body.find(pat_enter, header_start)
-            header = body[header_start:header_end]
-
-            # 找到正文的开始和结束位置
-            content_start = body.find(pat_enter, header_end) + 1
-            content_end = body.find(separator, content_start) - 2
-
-            # 提取正文内容
-            content = body[content_start:content_end]
-
-            body = content
-        else:
-            body = None
-        print(body)
         q_dict = decoded_url["queries_dict"]
         path = q_dict["path"]
         path = DATA_ROOT + '\\' + path
         print(path)
         path = path.replace("\\", "/")
         print(path)
-        file_name = file_name[1:-2]
-        file_name = file_name if body_type == "str" else file_name.decode()
-        filee = path + file_name
-        print(filee)
+
         if not os.path.exists(path):
             os.makedirs(path)
-        fill = open(filee, 'wb')
-        if body_type == "str":
-            body = body.encode()
-        fill.write(body)
-        fill.close()
-        file_size = len(body)
-        response = Response()
-        response.set_status_line(SCHEME, 200, "OK")
-        response.set_content_type("text/plain", "")
-        response.set_content_length(0)
-        response.set_keep_alive()
-        response.body = None
 
-        return response
+        datas = body_.split(boundary)
+        file_name = None
+        while True:
+
+            for data in datas:
+                if (isinstance(data, str) and data.strip("\r\n") == "--") or (
+                        isinstance(data, bytes) and data.strip(b'\r\n') == b'--'):
+                    response = Response()
+                    response.set_status_line(SCHEME, 200, "OK")
+                    response.set_content_type("text/plain", "")
+                    response.set_content_length(0)
+                    response.set_keep_alive()
+                    response.body = None
+
+                    return response
+
+                req = self.decode_raw_data(data)
+                header = req["headers"]
+                body: bytes
+                body = req["body"]
+                if (isinstance(body, str) and body.strip("\r\n") == "undefined") or (
+                        isinstance(body, bytes) and body.strip(b'\r\n') == b'undefined'):
+                    continue
+                if "Content" not in header:
+                    continue
+                headers = header.split(NEWLINE)
+                headers_dict = self.list2dict(headers)
+
+                file_info = headers_dict.get("Content-Disposition")
+                if file_info is None:
+                    file_info = ""
+                for info in file_info.split(";"):
+                    if "filename" in info:
+                        file_name = info.split("=")[1]
+                if file_name is None:
+                    file_name = str(os.times().__str__())
+                file_name = file_name.strip("\"")
+                filee = path + file_name
+                print(filee)
+
+                fill = open(filee, 'wb')
+                if isinstance(body, str):
+                    body = body.encode()
+                fill.write(body)
+                fill.close()
+
+            temp_data = client_socket.recv(4096).decode()
+            datas = temp_data.split(boundary)
+
+        # pat_file_name = re.compile(rb"filename=(.+)")
+        # pat_boundary = re.compile(rb'--([a-f\d]+)')
+        # pat_content_disp = b"Content-Disposition"
+        # pat_enter = b"\n"
+
+        # body_type = type(body).__name__
+
+        # match = pat_file_name.search(body)
+        # if match:
+        #     file_name = match.group(1)
+        #     print(file_name)
+
+        # match = re.search(pat_boundary, body)
+        # if match:
+        #     separator = match.group(1)
+        #
+        #     # 找到Content-Disposition头部
+        #     header_start = body.find(pat_content_disp)
+        #     header_end = body.find(pat_enter, header_start)
+        #     header = body[header_start:header_end]
+        #
+        #     # 找到正文的开始和结束位置
+        #     content_start = body.find(pat_enter, header_end) + 1
+        #     content_end = body.find(separator, content_start) - 2
+        #
+        #     # 提取正文内容
+        #     content = body[content_start:content_end]
+        #
+        #     body = content
+        # else:
+        #     body = None
+        # print(body)
+        # q_dict = decoded_url["queries_dict"]
+        # path = q_dict["path"]
+        # path = DATA_ROOT + '\\' + path
+        # print(path)
+        # path = path.replace("\\", "/")
+        # print(path)
+        # file_name = file_name[1:-2]
+        # file_name = file_name if body_type == "str" else file_name.decode()
+        # filee = path + file_name
+        # print(filee)
+        # if not os.path.exists(path):
+        #     os.makedirs(path)
+        # fill = open(filee, 'wb')
+        # if body_type == "str":
+        #     body = body.encode()
+        # fill.write(body)
+        # fill.close()
+        # file_size = len(body)
+        # response = Response()
+        # response.set_status_line(SCHEME, 200, "OK")
+        # response.set_content_type("text/plain", "")
+        # response.set_content_length(0)
+        # response.set_keep_alive()
+        # response.body = None
+        #
+        # return response
 
     def delete(self, decoded_url):
         q_dict = decoded_url["queries_dict"]
@@ -709,9 +789,9 @@ class server:
         resp.set_status_line(SCHEME, 200, "OK")
         resp.set_auth()
         resp.set_keep_alive()
-        cok = hash(usr) + rng.integers(1, 50)
-        resp.set_cookie(usr, cok)
-        session_dict[usr] = cok
+        # cok = hash(usr) + rng.integers(10000, 99999)
+        resp.set_session(usr)
+
         resp.body = ""
         return resp.build()
 
@@ -729,10 +809,10 @@ class server:
         resp.body = open('405.html', "r").read()
         return resp.build()
 
-    def session_dict_init(self):
-        for usr in user_dict.keys():
-            session_usr_dict[str(hash(usr) + hash(user_dict[usr]))] = usr
-        return
+    # def session_dict_init(self):
+    #     for usr in user_dict.keys():
+    #         session_usr_dict[str(hash(usr) + hash(user_dict[usr]))] = usr
+    #     return
 
 
 class Response:
@@ -802,10 +882,13 @@ class Response:
 
     def set_cookie(self, usr, param):
         self.headers["Set-Cookie"] = str(usr) + "=" + str(param) + "; path=/"
+
         return
 
     def set_session(self, usr):
-        self.headers["Set-Cookie"] = "session-id=" + str(hash(usr) + hash(user_dict[usr])) + "; path=/"
+        cok = str(str(rng.integers(100000, 999999)) + str(hash(usr)))
+        self.headers["Set-Cookie"] = "session-id=" + cok + "; path=/"
+        session_id_dict[cok] = [usr, int(datetime.datetime.now().timestamp())]
         return
 
     def remove_header(self, header: str):
@@ -849,8 +932,14 @@ class Response:
         msg = msg.encode()
         msg += bd
         self.message = msg
-
         return msg
+
+
+def clear_expire_session_job():
+    now = datetime.datetime.now().timestamp()
+    for k in session_id_dict.keys():
+        if now - k[1] < SESSION_EXPIRE_TIME_SEC:
+            session_id_dict.pop(k)
 
 
 if __name__ == "__main__":
