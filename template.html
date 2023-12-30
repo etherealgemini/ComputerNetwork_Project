@@ -159,22 +159,7 @@ function onHasParentDirectory() {
 
 }
 
-function upload() {
-  let file = document.getElementById("text_file").files[0];
-  let formData = new FormData();
-  formData.append("file", file);
 
-  let xhr = new XMLHttpRequest();
-  console.log(document.location.host+"/upload?path="+document.location.pathname)
-  xhr.open("POST", document.location.protocol+document.location.host+"/upload?path="+document.location.pathname);
-  xhr.send(formData);
-
-  xhr.onreadystatechange = function() {
-    if (xhr.readyState === 4 && xhr.status === 200) {
-      console.log("文件上传成功！");
-    }
-  }
-}
 
 function sortTable(column) {
   var theader = document.getElementById("theader");
@@ -222,6 +207,22 @@ function addHandlers(element, column) {
       e.preventDefault();
     }
   };
+}
+function upload() {
+  let file = document.getElementById("text_file").files[0];
+  let formData = new FormData();
+  formData.append("file", file);
+
+  let xhr = new XMLHttpRequest();
+  console.log(document.location.host+"/upload?path="+document.location.pathname)
+  xhr.open("POST", document.location.protocol+document.location.host+"/upload?path="+document.location.pathname);
+  xhr.send(formData);
+  xhr.onreadystatechange = function() {
+    console.log("READYSTATE" + xhr.readyState);
+    if (this.status == 200 && this.readyState == 4) {
+      location.reload();
+    }
+  }
 }
 
 function onLoad() {
@@ -324,13 +325,15 @@ window.addEventListener('DOMContentLoaded', onLoad);
     <input type="file" id="text_file" name="file" multiple accept="text/*"/>
   </div>
   <div>
-    <button onclick="upload()">提交</button>
+    <button type="button" id="submit_file">提交</button>
   </div>
 </form>
 
 </body>
 
 <script>"use strict";
+  document.getElementById("submit_file").addEventListener("click", upload,false);
+
 // Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
