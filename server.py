@@ -1,20 +1,24 @@
+import argparse
 import base64
 import datetime
 import logging
-import sys
 import mimetypes
 import re
+import select
 import socket
-import threading
-import argparse
-from apscheduler.schedulers.background import BackgroundScheduler
+# import threading
 from ast import walk
-from pathlib import Path
 from hashlib import sha256
-from re import Pattern
+from pathlib import Path
 
 import numpy as np
+from apscheduler.schedulers.background import BackgroundScheduler
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
+import util
 from util import *
 
 # 运行后，将在路径D:\\temp\pythonServer创建根目录文件夹，浏览器中运行http:\\localhost:8000\查看
@@ -29,7 +33,8 @@ MIME_TYPE = {
     "html": "text/html"
 }
 CHUNK_SIZE = 1024
-SESSION_EXPIRE_TIME_SEC = 3000
+SESSION_EXPIRE_TIME_SEC = 6000
+EXPIRE_CHECK_SEC_INTERVAL = 300
 user_dict = {
     "test": "123456",
     "client1": "123",
@@ -42,6 +47,7 @@ rng = np.random.default_rng()
 
 host = "localhost"
 port = 8080
+SSL = False
 
 parser_ = argparse.ArgumentParser(description="Server config")
 
@@ -73,7 +79,8 @@ def url_decoder(url: str) -> dict[str]:
     :return: a dict of decoded url
     """
 
-    # split方法会去除指定分隔符（第一个参数）
+    # split方法去除指定分隔符
+    url = util.url2str(url) if "%" in url else url
     scheme, r = url.split("://", 1) if "://" in url else ("", url)
     net_location, r = r.split("/", 1) if "/" in r else (r, "")
     path, r = ("/" + r).split("?", 1) if "?" in r else (r, "")
@@ -105,8 +112,9 @@ def url_decoder(url: str) -> dict[str]:
 
 class server:
     def __init__(self):
+        self.socket_queue = []
         scheduler = BackgroundScheduler()
-        scheduler.add_job(clear_expire_session_job, 'interval', seconds=10)
+        scheduler.add_job(clear_expire_session_job, 'interval', seconds=EXPIRE_CHECK_SEC_INTERVAL)
         scheduler.start()
 
         server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -118,22 +126,56 @@ class server:
         # self.session_dict_init()
         print(host)
         print(port)
+        server_socket.setblocking(False)
         server_socket.bind((host, 8080))
-
         server_socket.listen()
         self.launch()
+        # accept_t = threading.Thread(target=self.launch)
+        # accept_t.start()
+        print("__")
+        # handle_t = threading.Thread(target=self.accept_conn_)
+        # handle_t.start()
 
     def launch(self):
         server_socket = self.server_socket
+        sockets = [server_socket, ]
+        # socket_queue = self.socket_queue
         while True:
-            client_socket, client_address = server_socket.accept()
-            self.accept_conn(client_socket, client_address)
+            r, w, e = select.select(sockets, [], [])
+            for soc in r:
+                if soc == server_socket:
+                    try:
+                        client_socket, client_address = server_socket.accept()
+                        client_socket.setblocking(False)
+                        sockets.append(client_socket)
+                    except BlockingIOError:
+                        pass
+                else:
+                    try:
+                        self.handle_conn(soc, None)
+                    except Exception:
+                        pass
+        # while True:
+        #     try:
+        #         time.sleep(0.05)
+        #         client_socket, client_address = server_socket.accept()
+        #         # client_socket.setblocking(False)
+        #         self.accept_conn(client_socket,client_address)
+        #     except Exception as e:
+        #         pass
 
-    def accept_conn(self, client_socket, client_address):
-        t = threading.Thread(target=self.handle_conn,
-                             args=(client_socket, client_address))
-        print(t.name)
-        t.start()
+    # def accept_conn_(self):
+    #     print("s")
+    #     socket_queue = self.socket_queue
+    #     for s in socket_queue:
+    #         self.accept_conn(s,None)
+
+    # def accept_conn(self, client_socket, client_address):
+    #     # self.handle_conn(client_socket,client_address)
+    #     t = threading.Thread(target=self.handle_conn,
+    #                          args=(client_socket, client_address))
+    #     print(t.name)
+    #     t.start()
 
     """
     client_address: (host_address,port)
@@ -171,7 +213,6 @@ class server:
                 body_ = body.decode("utf-8")
             except UnicodeDecodeError:
                 body_ = body
-
         req = {
             "headers": headers,
             "body": body_  # 如果有主体的话，也进行 utf-8 解码
@@ -180,26 +221,30 @@ class server:
         return req
 
     def handle_conn(self, client_socket: socket.socket, client_address: tuple):
+        # print(f"handle: {client_socket}")
         data = client_socket.recv(4096)
+        if SSL:
+            data = fernet.decrypt(data).decode()
+        if data == b"request public key":
+            data = self.ssl(client_socket)
         req = self.decode_raw_data(data)
         self.handle_first_req(client_socket, req)
 
-        while True:
-            data = client_socket.recv(4096)
-            req = self.decode_raw_data(data)
-            if len(data) < 1:
-                continue
-            response, isClose = self.handle_request(client_socket, req)
-            self.send(client_socket, response)
-            if isClose:
-                client_socket.close()
+        # while True:
+        # data = client_socket.recv(4096)
+        # req = self.decode_raw_data(data)
+        # if len(data) < 1:
+        #     return
+        # response, isClose = self.handle_request(client_socket, req)
+        # self.send(client_socket, response)
+        # if isClose:
+        #     client_socket.close()
 
-            # finally:
-            # client_socket.close()
-            # break
+        # finally:
+        # client_socket.close()
+        # break
 
-    @staticmethod
-    def send(client_socket: socket.socket, response, username=None):
+    def send(self, client_socket: socket.socket, response, username=None):
         if response is None:
             logging.exception(f"trying to send an empty response to: {client_socket}")
             return
@@ -221,6 +266,9 @@ class server:
             response = response.encode('utf-8')
 
         print("send")
+        if SSL == True:
+            print(fernet)
+            response = fernet.encrypt(response)
         client_socket.sendall(response)
 
     def handle_first_req(self, client_socket, req: dict):
@@ -233,24 +281,26 @@ class server:
             print("auth success")
             if isClose: client_socket.close()
             return
-
-        response = self.authorization()
-        self.send(client_socket, response)
-
-        data = client_socket.recv(4096)
-        req = self.decode_raw_data(data)
-        auth_flag, username = self.check_auth(req)
-
         if not auth_flag:
-            self.send(client_socket, self.unAuthorized())
-            logging.info("auth failed")
-            client_socket.close()
+            response = self.authorization()
+            self.send(client_socket, response)
+            return
 
-        response, isClose = self.handle_request(client_socket, req)
-        self.send(client_socket, response, username)
-        print("auth success")
-        if isClose: client_socket.close()
-        return
+        # data = client_socket.recv(4096)
+        # req = self.decode_raw_data(data)
+        # auth_flag, username = self.check_auth(req)
+        #
+        # if not auth_flag:
+        #     self.send(client_socket, self.unAuthorized())
+        #     logging.info("auth failed")
+        #     client_socket.close()
+        #     return
+        #
+        # response, isClose = self.handle_request(client_socket, req)
+        # self.send(client_socket, response, username)
+        # print("auth success")
+        # if isClose: client_socket.close()
+        # return
 
     @staticmethod
     def check_auth(req: dict) -> (bool, None | str):
@@ -297,7 +347,8 @@ class server:
                     #     usr_name = session_name
                     #     auth_flag = True
                 break
-
+        if auth_flag and not os.path.exists("./data/" + usr_name):
+            os.makedirs("./data/" + usr_name)
         return auth_flag, usr_name
 
     """
@@ -313,6 +364,7 @@ class server:
     def handle_request(self, client_socket, req, isHead=False):
         try:
             print(req.__str__())
+            print("*******************")
             header = req["headers"]
             body: bytes
             body = req["body"]
@@ -394,6 +446,8 @@ class server:
             return self.upload(client_socket, decoded_url, body, headers_dict)
         elif decoded_url['target'] == 'delete':
             return self.delete(decoded_url)
+        elif decoded_url['target'] == 'create_dir':
+            return self.create_dir(decoded_url)
         else:
             return self.method_not_allowed()
 
@@ -413,9 +467,11 @@ class server:
             return self.download_regular(content, ftype, isHead)
         elif headers_dict.get("Range") is not None:
             range__ = headers_dict["Range"]
+            range__ = range__.split("=")[1] if "=" in range__ else range__
+
             range_ = range__.split(",") if "," in range__ else range__.strip()
             return self.send_ranged(client_socket, content, ftype, range_)
-        elif q_dict.get("chunk") is not None and q_dict["chunked"] == 1:
+        elif q_dict.get("chunked") is not None and q_dict["chunked"] == 1:
             return self.send_chunked(client_socket, content, ftype)
         else:
             return self.download_regular(content, ftype, isHead)
@@ -427,6 +483,7 @@ class server:
         # print(mimetypes.guess_type(path)[0])
         resp.set_content_type(mime_type, "")
         resp.set_keep_alive()
+        resp.set_accept_ranges()
         resp.body = content
         # out = resp.build_byte()
         return resp
@@ -475,6 +532,7 @@ class server:
         # resp.body = None
 
         resp_chunk = Response()
+        resp_chunk.set_accept_ranges()
         if isinstance(content, str):
             content = content.encode()
         pointer = 0
@@ -517,7 +575,7 @@ class server:
         # rest_len = len(content)
         file_size = len(content)
         # range_tuple = list(tuple)
-        if len(range_) > 1:
+        if isinstance(range_, list):
             mime_type = "multipart/byteranges"
             boundary = sha256(content + b'sustech').hexdigest()[:13]
             print(boundary)
@@ -558,14 +616,25 @@ class server:
             client_socket.sendall(resp_ranged.build_byte())
 
         else:
+
             mime_type = mime_type_
             s, t = range_.split("-")
+
             resp_ranged.set_ranged(s, t, file_size)
-            if s is None:
+            if s is None or s == "":
+                # s = int(s)
+                t = int(t)
                 s_, t_ = file_size - t + 1, file_size
-            elif t is None:
+            elif t is None or t == "":
+                s: int
+                s = int(s)
+                # t = int(t)
                 s_, t_ = s, file_size
             else:
+                s: int
+                t: int
+                s = int(s)
+                t = int(t)
                 s_, t_ = s, t
             resp_ranged.set_content_length(t_ - s_ + 1)
             resp_ranged.set_content_type(mime_type, "")
@@ -609,6 +678,7 @@ class server:
 
         datas = body_.split(boundary)
         file_name = None
+        fill = None
         while True:
 
             for data in datas:
@@ -620,7 +690,8 @@ class server:
                     response.set_content_length(0)
                     response.set_keep_alive()
                     response.body = None
-
+                    if fill is not None:
+                        fill.close()
                     return response
 
                 req = self.decode_raw_data(data)
@@ -630,8 +701,12 @@ class server:
                 if (isinstance(body, str) and body.strip("\r\n") == "undefined") or (
                         isinstance(body, bytes) and body.strip(b'\r\n') == b'undefined'):
                     continue
-                if "Content" not in header:
-                    continue
+                if (data=="" or data == b""):continue
+                if "Content" not in header and fill is not None:
+                    if not isinstance(data,bytes):data = data.encode()
+                    data:bytes
+                    fill.write(data)
+                    # continue
                 headers = header.split(NEWLINE)
                 headers_dict = self.list2dict(headers)
 
@@ -647,11 +722,10 @@ class server:
                 filee = path + file_name
                 print(filee)
 
-                fill = open(filee, 'wb')
+                fill = open(filee, 'ab')
                 if isinstance(body, str):
                     body = body.encode()
                 fill.write(body)
-                fill.close()
 
             temp_data = client_socket.recv(4096).decode()
             datas = temp_data.split(boundary)
@@ -715,6 +789,45 @@ class server:
         #
         # return response
 
+    def create_dir(self, decoded_url):
+        q_dict = decoded_url["queries_dict"]
+        path = q_dict.get("path")
+        print(2)
+        print(path)
+
+        if path:
+            path = DATA_ROOT + "\\" + path.replace("/", "\\")
+            print(2)
+            print(path)
+
+            if os.path.exists(path):
+                print("exist path")
+                response = Response()
+                response.set_status_line(SCHEME, 400, "Bad Request")
+                response.set_content_type("text/plain", "")
+                response.set_content_length(0)
+                response.set_keep_alive()
+                response.body = None
+                return response
+            else:
+                os.mkdir(path)
+                response = Response()
+                response.set_status_line(SCHEME, 200, "OK")
+                response.set_content_type("text/plain", "")
+                response.set_content_length(0)
+                response.set_keep_alive()
+                response.body = None
+                return response
+        else:
+            # Invalid request, missing 'path' parameter
+            response = Response()
+            response.set_status_line(SCHEME, 400, "Bad Request")
+            response.set_content_type("text/plain", "")
+            response.set_content_length(0)
+            response.set_keep_alive()
+            response.body = None
+            return response
+
     def delete(self, decoded_url):
         q_dict = decoded_url["queries_dict"]
         path = q_dict.get("path")
@@ -727,7 +840,10 @@ class server:
             print(path)
 
             if os.path.exists(path):
-                os.remove(path)
+                if os.path.isfile(path):
+                    os.remove(path)
+                elif os.path.isdir(path):
+                    os.rmdir(path)
                 response = Response()
                 response.set_status_line(SCHEME, 200, "OK")
                 response.set_content_type("text/plain", "")
@@ -753,6 +869,33 @@ class server:
             response.set_keep_alive()
             response.body = None
             return response
+
+    def ssl(self, client_socket: socket.socket):
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
+        public_key_b64 = base64.b64encode(public_key.public_bytes(encoding=serialization.Encoding.PEM,
+                                                                  format=serialization.PublicFormat.SubjectPublicKeyInfo))
+        print("Server public key:", public_key_b64.decode())
+        client_socket.send(public_key_b64)
+        encrypted_symmetric_key = client_socket.recv(1024)
+        symmetric_key = private_key.decrypt(encrypted_symmetric_key,
+                                            padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                                         algorithm=hashes.SHA256(), label=None))
+        global fernet
+        fernet = Fernet(symmetric_key)
+        print("Symmetric key:", symmetric_key.decode())
+        data = self.decrypt_recv(client_socket)
+        # print("Client:", data)
+        global SSL
+        SSL = True
+        return data
+
+    def decrypt_recv(self, client_socket: socket.socket):
+        # 接收加密数据
+        encrypted_data = client_socket.recv(1024)
+        # 对称解密数据
+        decrypted_data = fernet.decrypt(encrypted_data).decode()
+        return decrypted_data
 
     # def not_supported_request(self):
     #     print("request not supported")
@@ -869,6 +1012,8 @@ class Response:
         self.headers["Transfer-Encoding"] = "chunked"
 
     def set_ranged(self, start, end, maximum):
+        start = "" if start is None else start
+        end = "" if end is None else end
         self.headers["Content-Range"] = f"bytes {str(start)}-{str(end)}/{str(maximum)}"
 
     def body_build_ranged(self, start, end, maximum, isByte=False):
@@ -936,10 +1081,14 @@ class Response:
 
 
 def clear_expire_session_job():
-    now = datetime.datetime.now().timestamp()
-    for k in session_id_dict.keys():
-        if now - k[1] < SESSION_EXPIRE_TIME_SEC:
-            session_id_dict.pop(k)
+    try:
+        now = datetime.datetime.now().timestamp()
+        for k in session_id_dict.keys():
+            if now - session_id_dict[k][1] < SESSION_EXPIRE_TIME_SEC:
+                print(f"Expire: {k} for lifetime is {now - session_id_dict[k][1]}")
+                session_id_dict.pop(k)
+    except RuntimeError:
+        logging.exception(RuntimeError)
 
 
 if __name__ == "__main__":

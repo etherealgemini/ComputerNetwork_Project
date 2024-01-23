@@ -1,17 +1,19 @@
+import argparse
 import base64
 import logging
-import sys
 import mimetypes
 import re
 import socket
 import threading
-import argparse
 from ast import walk
-from pathlib import Path
 from hashlib import sha256
-from re import Pattern
+from pathlib import Path
 
 import numpy as np
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
 
 from util import *
 
@@ -39,6 +41,7 @@ rng = np.random.default_rng()
 
 host = "localhost"
 port = 8080
+SSL = False
 
 parser_ = argparse.ArgumentParser(description="Server config")
 
@@ -173,7 +176,12 @@ class server:
         return req
 
     def handle_conn(self, client_socket: socket.socket, client_address: tuple):
+        
         data = client_socket.recv(4096)
+        if SSL==True:
+            data=fernet.decrypt(data).decode()
+        if data==(b"request public key"):
+            data=self.ssl(client_socket)
         req = self.decode_raw_data(data)
         self.handle_first_req(client_socket, req)
 
@@ -191,8 +199,8 @@ class server:
             # client_socket.close()
             # break
 
-    @staticmethod
-    def send(client_socket: socket.socket, response, username=None):
+    
+    def send(self,client_socket: socket.socket, response,username=None):
         if response is None:
             logging.exception(f"trying to send an empty response to: {client_socket}")
             return
@@ -214,10 +222,13 @@ class server:
             response = response.encode('utf-8')
 
         print("send")
+        if SSL==True:
+            print(fernet)
+            response=fernet.encrypt(response)
         client_socket.sendall(response)
 
     def handle_first_req(self, client_socket, req: dict):
-
+        
         auth_flag, username = self.check_auth(req)
 
         if auth_flag:
@@ -306,6 +317,7 @@ class server:
     def handle_request(self, client_socket, req, isHead=False):
         try:
             print(req.__str__())
+            print("*******************")
             header = req["headers"]
             body: bytes
             body = req["body"]
@@ -605,7 +617,7 @@ class server:
         while True:
 
             for data in datas:
-                if (isinstance(data,str) and data.strip("\r\n") == "--") or (isinstance(data,bytes) and data.strip(b'\r\n') == b'--'):
+                if "--" in data:
                     response = Response()
                     response.set_status_line(SCHEME, 200, "OK")
                     response.set_content_type("text/plain", "")
@@ -743,7 +755,38 @@ class server:
             response.set_content_length(0)
             response.set_keep_alive()
             response.body = None
+
             return response
+    
+    def ssl(self,client_socket: socket.socket):
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        public_key = private_key.public_key()
+        public_key_b64 = base64.b64encode(public_key.public_bytes(encoding=serialization.Encoding.PEM, format=serialization.PublicFormat.SubjectPublicKeyInfo))
+        print("Server public key:", public_key_b64.decode())
+        client_socket.send(public_key_b64)
+        encrypted_symmetric_key=client_socket.recv(1024)
+        symmetric_key = private_key.decrypt(encrypted_symmetric_key, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+        global fernet 
+        fernet= Fernet(symmetric_key)
+        print("Symmetric key:", symmetric_key.decode())
+        data = self.decrypt_recv(client_socket)
+        #print("Client:", data)
+        global SSL
+        SSL=True
+        return data
+
+
+
+
+
+
+    def decrypt_recv(self,client_socket: socket.socket):
+        # 接收加密数据
+        encrypted_data = client_socket.recv(1024)
+        # 对称解密数据
+        decrypted_data = fernet.decrypt(encrypted_data).decode()
+        return decrypted_data
+
 
     # def not_supported_request(self):
     #     print("request not supported")
